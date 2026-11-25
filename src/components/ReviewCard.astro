@@ -1,0 +1,61 @@
+---
+import Score from './Score.astro';
+import { formatMonth } from '../lib/format';
+import type { PublicReview } from '../lib/teachers';
+
+interface Props {
+  review: PublicReview;
+  /** Hide the institution name when the list is already filtered to one institution. */
+  showInstitution?: boolean;
+}
+
+const { review, showInstitution = true } = Astro.props;
+const context = [review.subject, showInstitution ? review.institution_name : null, review.period]
+  .filter(Boolean)
+  .join(' · ');
+---
+
+<article class="card review" id={`atsauksme-${review.id}`}>
+  <header class="review-head">
+    <Score score={review.overall_score} />
+    <div class="review-context">
+      {context && <div class="review-what">{context}</div>}
+      <div class="subtle small">
+        <time datetime={review.created_at.slice(0, 7)}>{formatMonth(review.created_at)}</time>
+        {review.edited_by_moderator === 1 && (
+          <span class="badge" title="Moderators izņēmis daļu teksta, piemēram, personas datus vai aizskarošus izteicienus.">
+            Moderatora labots
+          </span>
+        )}
+      </div>
+    </div>
+  </header>
+
+  {review.scores.length > 0 && (
+    <ul class="review-scores" aria-label="Vērtējums pa kritērijiem">
+      {review.scores.map((s) => (
+        <li><span class="muted">{s.label}</span> <strong>{s.score}</strong></li>
+      ))}
+    </ul>
+  )}
+
+  <p class="review-text">{review.comment}</p>
+
+  {review.tags.length > 0 && (
+    <div class="badges">
+      {review.tags.map((t) => <span class:list={['badge', 'tag', t.sentiment]}>{t.label}</span>)}
+    </div>
+  )}
+
+  {review.reply && (
+    <div class="reply">
+      <div class="reply-head">Pedagoga atbilde</div>
+      <p class="review-text">{review.reply.body}</p>
+    </div>
+  )}
+
+  <footer class="review-foot">
+    <a href={`/atbildet/${review.id}`} rel="nofollow">{review.reply ? 'Papildināt atbildi' : 'Esmu šis pedagogs: atbildēt'}</a>
+    <a href={`/dzesanas-pieprasijums?atsauksme=${review.id}`} rel="nofollow">Ziņot par pārkāpumu</a>
+  </footer>
+</article>

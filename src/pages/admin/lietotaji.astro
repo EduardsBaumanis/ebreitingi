@@ -1,0 +1,137 @@
+---
+// CMS users: admins only. Each email must also be allowed in the Cloudflare Access policy.
+import Admin from '../../layouts/Admin.astro';
+import { ROLE_LABELS, type AdminRole } from '../../lib/auth';
+
+const me = Astro.locals.admin!;
+if (me.role !== 'admin') {
+  return new Response('Šī sadaļa pieejama tikai administratoriem.', {
+    status: 403,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+  });
+}
+
+const db = Astro.locals.runtime.env.DB;
+const ROLES: AdminRole[] = ['admin', 'moderator'];
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const MESSAGES: Record<string, { ok: boolean; text: string }> = {
+  added: { ok: true, text: 'Lietotājs saglabāts.' },
+  updated: { ok: true, text: 'Izmaiņas saglabātas.' },
+  invalid: { ok: false, text: 'Nederīgs e-pasts vai loma.' },
+  self: { ok: false, text: 'Savu kontu nevar deaktivizēt vai pazemināt.' },
+};
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  let msg = 'invalid';
+
+  if (action === 'add') {
+    const email = String(form.get('email') ?? '').trim().toLowerCase();
+    const name = String(form.get('name') ?? '').trim().slice(0, 100) || null;
+    const role = String(form.get('role') ?? '') as AdminRole;
+    if (EMAIL_RE.test(email) && email.length <= 254 && ROLES.includes(role)) {
+      await db
+        .prepare(
+          `INSERT INTO admin_users (email, name, role) VALUES (?1, ?2, ?3)
+           ON CONFLICT(email) DO UPDATE SET name = COALESCE(excluded.name, name), role = excluded.role, active = 1`,
+        )
+        .bind(email, name, role)
+        .run();
+      msg = 'added';
+    }
+  } else if (action === 'set-role' || action === 'set-active') {
+    const id = Number(form.get('id'));
+    if (Number.isInteger(id) && id > 0) {
+      if (id === me.id) {
+        msg = 'self';
+      } else if (action === 'set-role') {
+        const role = String(form.get('role') ?? '') as AdminRole;
+        if (ROLES.includes(role)) {
+          await db.prepare('UPDATE admin_users SET role = ?1 WHERE id = ?2').bind(role, id).run();
+          msg = 'updated';
+        }
+      } else {
+        const active = form.get('active') === '1' ? 1 : 0;
+        await db.prepare('UPDATE admin_users SET active = ?1 WHERE id = ?2').bind(active, id).run();
+        msg = 'updated';
+      }
+    }
+  }
+
+  return Astro.redirect(`/admin/lietotaji?msg=${msg}`, 303);
+}
+
+const message = MESSAGES[Astro.url.searchParams.get('msg') ?? ''];
+const { results: users } = await db
+  .prepare('SELECT id, email, name, role, active, created_at FROM admin_users ORDER BY active DESC, email')
+  .all<{ id: number; email: string; name: string | null; role: AdminRole; active: number; created_at: string }>();
+---
+
+<Admin title="CMS lietotāji">
+  {message && <div class:list={['notice', message.ok ? 'ok' : 'err']}>{message.text}</div>}
+
+  <p class="muted">
+    Pieteikšanās notiek caur Cloudflare Access. Pēc lietotāja pievienošanas šeit pārliecinieties, ka viņa e-pasts ir
+    atļauts arī Access politikā.
+  </p>
+
+  <h2>Pievienot lietotāju</h2>
+  <form method="post" class="form-row card">
+    <input type="hidden" name="action" value="add" />
+    <label>E-pasts <input type="email" name="email" required maxlength="254" /></label>
+    <label>Vārds <input type="text" name="name" maxlength="100" /></label>
+    <label>
+      Loma
+      <select name="role">
+        {ROLES.map((r) => <option value={r} selected={r === 'moderator'}>{ROLE_LABELS[r]}</option>)}
+      </select>
+    </label>
+    <button type="submit">Pievienot</button>
+  </form>
+
+  <h2>Lietotāji</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>E-pasts</th><th>Vārds</th><th>Loma</th><th>Statuss</th><th>Pievienots</th></tr>
+      </thead>
+      <tbody>
+        {users.map((u) => (
+          <tr>
+            <td>{u.email}{u.id === me.id && <span class="badge"> jūs</span>}</td>
+            <td>{u.name ?? '—'}</td>
+            <td>
+              {u.id === me.id ? (
+                ROLE_LABELS[u.role]
+              ) : (
+                <form method="post" class="inline">
+                  <input type="hidden" name="action" value="set-role" />
+                  <input type="hidden" name="id" value={u.id} />
+                  <select name="role" aria-label={`Loma: ${u.email}`}>
+                    {ROLES.map((r) => <option value={r} selected={r === u.role}>{ROLE_LABELS[r]}</option>)}
+                  </select>
+                  <button type="submit" class="secondary">Saglabāt</button>
+                </form>
+              )}
+            </td>
+            <td>
+              {u.id === me.id ? (
+                'Aktīvs'
+              ) : (
+                <form method="post" class="inline">
+                  <input type="hidden" name="action" value="set-active" />
+                  <input type="hidden" name="id" value={u.id} />
+                  <input type="hidden" name="active" value={u.active ? '0' : '1'} />
+                  <button type="submit" class="secondary">{u.active ? 'Deaktivizēt' : 'Aktivizēt'}</button>
+                </form>
+              )}
+            </td>
+            <td class="muted">{u.created_at.slice(0, 10)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</Admin>

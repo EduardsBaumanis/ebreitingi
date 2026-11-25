@@ -1,0 +1,143 @@
+---
+import Base from '../../layouts/Base.astro';
+import Breadcrumbs from '../../components/Breadcrumbs.astro';
+import Score from '../../components/Score.astro';
+import { formatLocation, formatScore, plural } from '../../lib/format';
+import { getInstitutionBySlug, getInstitutionTeachers } from '../../lib/institutions';
+import { veidsInfo } from '../../lib/veidi';
+
+const db = Astro.locals.runtime.env.DB;
+const inst = await getInstitutionBySlug(db, Astro.params.slug ?? '');
+if (!inst) {
+  return Astro.rewrite('/404');
+}
+
+const teachers = await getInstitutionTeachers(db, inst.id);
+const veids = veidsInfo(inst.veids);
+const location = formatLocation(inst.location);
+
+const details: [string, string | null][] = [
+  ['Veids', inst.veids],
+  ['Tips', inst.tips],
+  ['Atrašanās vieta', location],
+  ['Dibinātājs', inst.founder],
+  ['Pakļautība', inst.subordination],
+  ['Akreditēta', inst.accredited ? 'Jā' : 'Nē'],
+  ['Reģistrācijas numurs', inst.reg_number],
+];
+
+const description =
+  inst.avg_score != null
+    ? `${inst.name}: vidējais pedagogu vērtējums ${formatScore(inst.avg_score)} no 5 (${plural(inst.review_count, 'atsauksme', 'atsauksmes')}). Anonīmas skolēnu un studentu atsauksmes.`
+    : `${inst.name}: pedagogu vērtējumi un anonīmas skolēnu un studentu atsauksmes.`;
+
+const pageUrl = new URL(`/iestades/${inst.slug}`, Astro.url.origin).href;
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'EducationalOrganization',
+  name: inst.name,
+  url: pageUrl,
+  identifier: inst.reg_number,
+  ...(location && { address: { '@type': 'PostalAddress', addressLocality: location, addressCountry: 'LV' } }),
+  ...(inst.avg_score != null &&
+    inst.review_count > 0 && {
+      aggregateRating: {
+        '@type': 'AggregateRating',
+        ratingValue: Math.round(inst.avg_score * 10) / 10,
+        bestRating: 5,
+        worstRating: 1,
+        ratingCount: inst.review_count,
+      },
+    }),
+};
+---
+
+<Base title={inst.name} description={description} jsonLd={jsonLd}>
+  <Breadcrumbs
+    items={[
+      { label: 'Sākums', href: '/' },
+      { label: 'Iestādes', href: '/iestades' },
+      { label: veids.label, href: `/iestades?veids=${veids.slug}` },
+      { label: inst.name },
+    ]}
+  />
+
+  <div class="page-head">
+    <div>
+      <div class="badges">
+        <span class="badge accent">{veids.label}</span>
+        {inst.tips && inst.tips !== inst.veids && <span class="badge">{inst.tips}</span>}
+        {location && <span class="badge">{location}</span>}
+        {inst.liquidated === 1 && <span class="badge warn">Likvidēta</span>}
+      </div>
+      <h1>{inst.name}</h1>
+      <a class="button head-action" href={`/vertet?iestade=${inst.slug}`}>Novērtēt pedagogu</a>
+    </div>
+
+    <div class="card score-panel">
+      <Score score={inst.avg_score} size="lg" />
+      <div class="facts">
+        {inst.avg_score != null ? (
+          <>
+            <strong>Vidējais pedagogu vērtējums</strong><br />
+            {plural(inst.rated_teachers, 'novērtēts pedagogs', 'novērtēti pedagogi')},
+            {' '}{plural(inst.review_count, 'atsauksme', 'atsauksmes')}
+          </>
+        ) : (
+          <>
+            <strong>Vēl nav vērtējumu</strong><br />
+            Esi pirmais, kas novērtē šīs iestādes pedagogus.
+          </>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <div class="two-col">
+    <section aria-labelledby="pedagogi">
+      <h2 id="pedagogi">Pedagogi</h2>
+      {teachers.length > 0 ? (
+        <ul class="result-list">
+          {teachers.map((t) => (
+            <li class="result">
+              <div class="body">
+                <a class="title" href={`/pedagogi/${t.slug}`}>{t.full_name}</a>
+                {t.subjects && <div class="meta">{t.subjects}</div>}
+              </div>
+              <div class="side">
+                <Score score={t.avg_score} />
+                <span class="count">
+                  {t.review_count > 0 ? plural(t.review_count, 'atsauksme', 'atsauksmes') : 'Nav atsauksmju'}
+                </span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div class="empty">
+          <p><strong>Šai iestādei vēl nav pievienotu pedagogu.</strong></p>
+          <p>Ieteic pedagogu un uzraksti pirmo atsauksmi.</p>
+          <p><a class="button" href={`/vertet?iestade=${inst.slug}`}>Ieteikt pedagogu</a></p>
+        </div>
+      )}
+      <p class="subtle small footnote">
+        Iestādes vērtējums ir tās pedagogu vidējo vērtējumu vidējais, kur katrs pedagogs ir ar vienādu svaru.
+        Tiek ņemtas vērā tikai atsauksmes par darbu šajā iestādē.
+      </p>
+    </section>
+
+    <aside class="card" aria-labelledby="info">
+      <h3 id="info">Par iestādi</h3>
+      <dl class="details">
+        {details
+          .filter(([, value]) => value)
+          .map(([label, value]) => (
+            <>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </>
+          ))}
+      </dl>
+    </aside>
+  </div>
+</Base>

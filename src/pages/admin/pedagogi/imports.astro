@@ -1,0 +1,138 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import { adminOnly } from '../../../lib/auth';
+import { createTeachers } from '../../../lib/teachers';
+import { plural } from '../../../lib/format';
+import {
+  analyzeImport,
+  importableRows,
+  IMPORT_MAX_BYTES,
+  IMPORT_MAX_ROWS,
+  type ImportAnalysis,
+  type RowStatus,
+} from '../../../lib/teacher-import';
+
+const denied = adminOnly(Astro.locals);
+if (denied) return denied;
+
+const db = Astro.locals.runtime.env.DB;
+
+const STATUS_TEXT: Record<RowStatus, string> = {
+  ok: 'Tiks pievienots',
+  warning: 'Tiks pievienots (pārbaudi)',
+  skip: 'Tiks izlaists',
+  error: 'Kļūda',
+};
+
+let text = '';
+let analysis: ImportAnalysis | null = null;
+let error: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? 'preview');
+  const file = form.get('file');
+
+  if (file instanceof File && file.size > 0) {
+    if (file.size > IMPORT_MAX_BYTES) error = 'Fails ir pārāk liels (maksimums 1 MB).';
+    else text = await file.text();
+  } else {
+    text = String(form.get('text') ?? '');
+  }
+
+  if (!error) {
+    // Analysed again on confirm, so the import uses the database as it is now.
+    analysis = await analyzeImport(db, text);
+    error = analysis.fatal;
+
+    if (!error && action === 'import') {
+      const rows = importableRows(analysis);
+      if (rows.length) {
+        await createTeachers(
+          db,
+          rows.map((r) => ({ fullName: r.fullName, institutionId: r.institution!.id, subjects: r.subjects })),
+          { status: 'active', source: 'import' },
+        );
+      }
+      return Astro.redirect(`/admin/pedagogi/imports?imported=${rows.length}`, 303);
+    }
+  }
+}
+
+const imported = Astro.url.searchParams.get('imported');
+const importCount = analysis ? analysis.counts.ok + analysis.counts.warning : 0;
+---
+
+<Admin title="Importēt pedagogus">
+  <p class="muted"><a href="/admin/pedagogi">‹ Visi pedagogi</a></p>
+
+  {imported !== null && (
+    <div class="notice ok">
+      Importēti: {plural(Number(imported) || 0, 'pedagogs', 'pedagogi')}. <a href="/admin/pedagogi?statuss=active">Skatīt sarakstu</a>
+    </div>
+  )}
+  {error && <div class="notice err">{error}</div>}
+
+  {!analysis || analysis.fatal ? (
+    <section class="card">
+      <h3>1. Augšupielādē failu</h3>
+      <p class="small">
+        CSV vai teksts ar kolonnām <code>vārds uzvārds; iestādes reģistrācijas numurs; priekšmeti</code>.
+        Atdalītājs var būt <code>;</code>, tabulācija vai komats. Pirmā rinda var būt virsraksts.
+        Līdz {IMPORT_MAX_ROWS} rindām vienā reizē.
+      </p>
+      <pre class="example">full_name;institution_reg_number;subjects
+Anna Bērziņa;3391000218;Matemātiskā analīze
+Jānis Kalniņš;1013900258;Fizika, Ķīmija</pre>
+      <form method="post" enctype="multipart/form-data" class="stack-form">
+        <input type="hidden" name="action" value="preview" />
+        <label>CSV fails <input type="file" name="file" accept=".csv,.txt,text/csv,text/plain" /></label>
+        <label>
+          …vai ielīmē tekstu
+          <textarea name="text" rows="8" spellcheck="false">{text}</textarea>
+        </label>
+        <div><button type="submit">Pārbaudīt</button></div>
+      </form>
+    </section>
+  ) : (
+    <section>
+      <h3>2. Pārbaudi un apstiprini</h3>
+      <div class="grid summary-grid">
+        <div class="card stat"><div class="value">{analysis.counts.ok}</div><div class="label">Tiks pievienoti</div></div>
+        <div class="card stat"><div class="value">{analysis.counts.warning}</div><div class="label">Tiks pievienoti, bet pārbaudi</div></div>
+        <div class="card stat"><div class="value">{analysis.counts.skip}</div><div class="label">Tiks izlaisti</div></div>
+        <div class="card stat"><div class="value">{analysis.counts.error}</div><div class="label">Kļūdas</div></div>
+      </div>
+
+      <form method="post" class="form-row footnote">
+        <input type="hidden" name="action" value="import" />
+        <textarea name="text" hidden>{text}</textarea>
+        <button type="submit" disabled={importCount === 0}>Importēt ({importCount})</button>
+        <a class="button ghost" href="/admin/pedagogi/imports">Atcelt</a>
+      </form>
+      {analysis.counts.error > 0 && (
+        <p class="subtle small">Rindas ar kļūdām netiks importētas. Izlabo failu un augšupielādē vēlreiz, ja tās vajag.</p>
+      )}
+
+      <div class="table-wrap footnote">
+        <table>
+          <thead><tr><th>Rinda</th><th>Vārds</th><th>Iestāde</th><th>Priekšmeti</th><th>Rezultāts</th></tr></thead>
+          <tbody>
+            {analysis.rows.map((r) => (
+              <tr class:list={[`row-${r.status}`]}>
+                <td class="small muted">{r.line}</td>
+                <td>{r.fullName || '—'}</td>
+                <td class="small">{r.institution?.name ?? r.regNumber ?? '—'}</td>
+                <td class="small">{r.subjects ?? ''}</td>
+                <td class="small">
+                  <span class:list={['badge', `import-${r.status}`]}>{STATUS_TEXT[r.status]}</span>
+                  {r.messages.map((m) => <div class="muted">{m}</div>)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )}
+</Admin>

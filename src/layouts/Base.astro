@@ -1,0 +1,93 @@
+---
+import '../styles/global.css';
+import JsonLd from '../components/JsonLd.astro';
+import { SITE } from '../lib/site';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Hide the header search box (the home page has its own). */
+  hideHeaderSearch?: boolean;
+  /** Keep filtered/search result pages out of search engines. */
+  noindex?: boolean;
+  /** Canonical path, e.g. "/iestades". Defaults to the current path without query. */
+  canonicalPath?: string;
+  /** schema.org structured data for this page. */
+  jsonLd?: object | object[];
+}
+
+const SITE_NAME = SITE.name;
+const {
+  title,
+  description = 'Anonīmi skolēnu un studentu vērtējumi par pedagogiem un izglītības kvalitāti Latvijā.',
+  hideHeaderSearch = false,
+  noindex = false,
+  canonicalPath = Astro.url.pathname,
+  jsonLd,
+} = Astro.props;
+
+const fullTitle = title === SITE_NAME ? title : `${title} | ${SITE_NAME}`;
+const canonical = new URL(canonicalPath, Astro.url.origin).href;
+const path = Astro.url.pathname;
+const nav = [
+  { href: '/iestades', label: 'Iestādes' },
+  { href: '/vertet', label: 'Uzrakstīt atsauksmi' },
+];
+---
+
+<!doctype html>
+<html lang="lv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    {noindex && <meta name="robots" content="noindex, follow" />}
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="lv_LV" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="theme-color" content="#9e1b32" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    {jsonLd && <JsonLd data={jsonLd} />}
+  </head>
+  <body>
+    <a class="skip-link" href="#saturs">Pāriet uz saturu</a>
+    <header class="site">
+      <div class="container">
+        <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">P</span>{SITE_NAME}</a>
+        <nav aria-label="Galvenā navigācija">
+          {nav.map((l) => (
+            <a href={l.href} aria-current={path === l.href || path.startsWith(l.href + '/') ? 'page' : undefined}>
+              {l.label}
+            </a>
+          ))}
+        </nav>
+        {!hideHeaderSearch && (
+          <form class="header-search" action="/meklet" method="get" role="search">
+            <label class="visually-hidden" for="header-q">Meklēt iestādi vai pedagogu</label>
+            <input id="header-q" type="search" name="q" placeholder="Meklēt iestādi vai pedagogu…" maxlength="100" />
+          </form>
+        )}
+      </div>
+    </header>
+    <main id="saturs" class="container" tabindex="-1">
+      <slot />
+    </main>
+    <footer class="site">
+      <div class="container">
+        <span>Atsauksmes ir anonīmas un tiek publicētas tikai pēc moderatora pārbaudes.</span>
+        <nav aria-label="Informācija" class="footer-links">
+          <a href="/noteikumi">Noteikumi</a>
+          <a href="/privatuma-politika">Privātuma politika</a>
+          <a href="/dzesanas-pieprasijums">Dzēšanas pieprasījums</a>
+          <span>© {new Date().getFullYear()} {SITE_NAME}</span>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

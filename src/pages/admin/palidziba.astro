@@ -1,0 +1,170 @@
+---
+// Moderator and admin handbook (plan.md week 8: moderator onboarding).
+import Admin from '../../layouts/Admin.astro';
+import { REJECT_REASONS } from '../../lib/moderation';
+import { RETENTION } from '../../lib/retention';
+
+const me = Astro.locals.admin!;
+---
+
+<Admin title="Moderatora rokasgrāmata">
+  <article class="prose handbook">
+    <nav class="card toc" aria-label="Saturs">
+      <strong>Saturs</strong>
+      <ol>
+        <li><a href="#principi">Pamatprincipi</a></li>
+        <li><a href="#atsauksmes">Atsauksmju moderēšana</a></li>
+        <li><a href="#labosana">Kad labot, kad noraidīt</a></li>
+        <li><a href="#ieteikumi">Ieteiktie pedagogi</a></li>
+        <li><a href="#atbildes">Pedagogu atbildes</a></li>
+        <li><a href="#publicetas">Publicētas atsauksmes</a></li>
+        {me.role === 'admin' && <li><a href="#pieprasijumi">Dzēšanas pieprasījumi (administratoriem)</a></li>}
+        <li><a href="#taustini">Īsinājumtaustiņi</a></li>
+        <li><a href="#privatums">Privātums un drošība</a></li>
+      </ol>
+    </nav>
+
+    <h2 id="principi">1. Pamatprincipi</h2>
+    <ul>
+      <li><strong>Negatīva atsauksme nav iemesls noraidīšanai.</strong> Vērtējam, vai teksts atbilst <a href="/noteikumi" target="_blank" rel="noopener">noteikumiem</a>, nevis vai tam piekrītam.</li>
+      <li>Atsauksme drīkst runāt tikai par pedagoga <strong>profesionālo darbu</strong>: mācīšanu, vērtēšanu, pieejamību, attieksmi stundās.</li>
+      <li>Šaubu gadījumā: ja var izņemt problemātisko daļu un pārējais joprojām ir noderīgs, <strong>labojiet</strong>; ja nē, <strong>noraidiet</strong>.</li>
+      <li>Mērķis: neviena atsauksme negaida ilgāk par <strong>3 dienām</strong>. Rindas vecumu redz panelī.</li>
+    </ul>
+
+    <h2 id="atsauksmes">2. Atsauksmju moderēšana</h2>
+    <ol>
+      <li>Panelī nospiediet <strong>“Sākt moderēt”</strong>. Atvērsies vecākā atsauksme rindā.</li>
+      <li>Izlasiet tekstu, priekšmetu un birkas. Pārbaudiet, vai vērtējumi atbilst tekstam (piemēram, visur 1, bet teksts slavē, var liecināt par kļūdu vai viltojumu).</li>
+      <li>Izvēlieties: <strong>Apstiprināt</strong>, <strong>Labot un apstiprināt</strong> vai <strong>Noraidīt</strong> ar iemeslu. Pēc darbības automātiski atveras nākamā.</li>
+      <li>Ja nevarat izlemt, spiediet <strong>Izlaist</strong>. Atsauksme paliks rindā kolēģim.</li>
+    </ol>
+    <p>Noraidīšanas iemesli:</p>
+    <ul>
+      {REJECT_REASONS.map((r) => <li>{r}</li>)}
+      <li>Cits (aprakstiet komentārā)</li>
+    </ul>
+    <p class="small muted">
+      Ja tas pats teksts vai ļoti līdzīgi teksti par vienu pedagogu parādās vairākkārt īsā laikā, tā, visticamāk, ir
+      viltota kampaņa: noraidiet ar iemeslu “Atkārtota vai, visticamāk, viltota atsauksme” un informējiet administratoru.
+    </p>
+
+    <h2 id="labosana">3. Kad labot, kad noraidīt</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Atsauksmē ir…</th><th>Ko darīt</th></tr></thead>
+        <tbody>
+          <tr><td>Tālrunis, e-pasts, adrese, saite</td><td>Labot: izņemiet, ierakstiet <code>[izņemts]</code></td></tr>
+          <tr><td>Cita skolēna vai trešās personas vārds</td><td>Labot: aizstājiet ar “kāds skolēns” vai <code>[izņemts]</code></td></tr>
+          <tr><td>Viens rupjš vārds citādi lietišķā tekstā</td><td>Labot: izņemiet vārdu</td></tr>
+          <tr><td>Informācija, pēc kuras var atpazīt pašu autoru</td><td>Labot: izņemiet (autora aizsardzībai)</td></tr>
+          <tr><td>Apvainojumi, draudi, naida runa kā teksta galvenā doma</td><td>Noraidīt</td></tr>
+          <tr><td>Apgalvojumi par privāto dzīvi, izskatu, veselību</td><td>Noraidīt (vai labot, ja tas ir viens teikums)</td></tr>
+          <tr><td>Apsūdzības noziegumos vai pārkāpumos (kukuļi, vardarbība)</td><td>Noraidīt; nopietnos gadījumos informējiet administratoru</td></tr>
+          <tr><td>Teksts nav par mācībām, reklāma, bezjēdzīgs teksts</td><td>Noraidīt</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Pēc labošanas pie atsauksmes publiski būs atzīme “Moderatora labots”. Sākotnējais teksts redzams tikai CMS un tiek
+      automātiski dzēsts pēc {RETENTION.originalTextDays} dienām.
+    </p>
+
+    <h2 id="ieteikumi">4. Ieteiktie pedagogi</h2>
+    <p>Ja skolēns ieteica pedagogu, kura vēl nav vietnē, atsauksmes lapā augšā būs dzeltens bloks. Atsauksmi var publicēt tikai pēc tam, kad pedagogs ir apstrādāts:</p>
+    <ul>
+      <li><strong>Apstiprināt pedagogu:</strong> ja vārds izskatās īsts. Izlabojiet rakstību (lielie burti, garumzīmes), ja vajag.</li>
+      <li><strong>Piesaistīt esošam pedagogam:</strong> ja tas ir kāds, kurš jau ir sarakstā (piemēram, “L. Ozola” = “Līga Ozola”). Līdzīgie vārdi sarakstā ir atzīmēti.</li>
+      <li><strong>Noraidīt ieteikumu:</strong> izdomāti vai joku vārdi. Tiks dzēsts ieteikums un visas tā atsauksmes.</li>
+    </ul>
+    <p class="small muted">Ja vārds ir neskaidrs (tikai vārds bez uzvārda), labāk noraidiet: nepareizi piesaistīta atsauksme kaitē īstajam pedagogam.</p>
+
+    <h2 id="atbildes">5. Pedagogu atbildes</h2>
+    <p>Pirms publicēšanas jāpārliecinās, ka atbildi rakstījis pats pedagogs:</p>
+    <ol>
+      <li>Ja e-pasts ir iestādes domēnā un vārds sakrīt (piemēram, <code>anna.berzina@skola.lv</code>), parasti pietiek.</li>
+      <li>Citādi nosūtiet vēstuli (veidne zemāk) un publicējiet tikai pēc apstiprinājuma.</li>
+      <li>Atbildē nedrīkst būt skolēnu vārdi vai citi personas dati; ja ir, izlabojiet pirms publicēšanas.</li>
+    </ol>
+    <p>Pēc lēmuma e-pasta adrese tiek dzēsta automātiski.</p>
+    <details class="card template">
+      <summary>Veidne: identitātes pārbaude</summary>
+      <pre>Labdien!
+
+Vietnē “Pedagogu vērtējumi” saņēmām atbildi uz atsauksmi, kas iesniegta Jūsu vārdā.
+Lūdzu, apstipriniet, atbildot uz šo vēstuli, ka atbildi rakstījāt Jūs.
+Ja šī atbilde nav no Jums, vienkārši ignorējiet šo vēstuli: atbilde netiks publicēta.
+
+Ar cieņu,
+Pedagogu vērtējumi moderators</pre>
+    </details>
+
+    <h2 id="publicetas">6. Publicētas atsauksmes</h2>
+    <p>
+      Sadaļā <a href="/admin/atsauksmes?statuss=approved">Atsauksmes → Publicēta</a> var atvērt jebkuru publicētu
+      atsauksmi, labot tās tekstu vai noņemt to no vietnes ar iemeslu. Noņemtu vai noraidītu atsauksmi var atgriezt rindā.
+      Noraidītas un noņemtas atsauksmes tiek automātiski dzēstas pēc {RETENTION.rejectedReviewMonths} mēnešiem.
+    </p>
+
+    {me.role === 'admin' && (
+      <>
+        <h2 id="pieprasijumi">7. Dzēšanas pieprasījumi (administratoriem)</h2>
+        <p>Uz pieprasījumu jāatbild <strong>ne vēlāk kā 30 dienu laikā</strong> (VDAR). Termiņš redzams sarakstā.</p>
+        <ol>
+          <li>Izlasiet pieprasījumu un apskatiet saturu (saites pieprasījuma lapā).</li>
+          <li>Izlemiet un veiciet darbību: noņemiet atsauksmi, labojiet to vai noņemiet visu pedagoga lapu. Pedagoga lapas noņemšana slēpj arī visas viņa atsauksmes un neļauj lapu izveidot atkārtoti.</li>
+          <li>Atzīmējiet lēmumu (apmierināts / daļēji / noraidīts ar pamatojumu).</li>
+          <li>Nosūtiet atbildi pieprasītājam no sava e-pasta (veidnes zemāk).</li>
+        </ol>
+        <p class="small muted">
+          Ja pedagogs iebilst pret savas lapas esamību, parasti lapa jānoņem, ja vien nav būtisku iemeslu to saglabāt.
+          Šaubu gadījumā konsultējieties ar juristu, pirms atsakāt.
+        </p>
+        <details class="card template">
+          <summary>Veidne: pieprasījums apmierināts</summary>
+          <pre>Labdien!
+
+Esam izskatījuši Jūsu pieprasījumu nr. [NR.] un to apmierinājuši: [atsauksme / lapa] ir noņemta no vietnes “Pedagogu vērtējumi”.
+
+Jūsu vārds un e-pasts tiks dzēsti {RETENTION.removalRequestMonths} mēnešus pēc pieprasījuma izskatīšanas.
+
+Ar cieņu,
+Pedagogu vērtējumi</pre>
+        </details>
+        <details class="card template">
+          <summary>Veidne: pieprasījums noraidīts</summary>
+          <pre>Labdien!
+
+Esam izskatījuši Jūsu pieprasījumu nr. [NR.]. Diemžēl to nevaram apmierināt, jo [pamatojums].
+
+Jums ir tiesības iesniegt sūdzību Datu valsts inspekcijai (www.dvi.gov.lv).
+
+Ar cieņu,
+Pedagogu vērtējumi</pre>
+        </details>
+      </>
+    )}
+
+    <h2 id="taustini">{me.role === 'admin' ? 8 : 7}. Īsinājumtaustiņi moderēšanas rindā</h2>
+    <div class="table-wrap">
+      <table>
+        <tbody>
+          <tr><td><kbd>A</kbd></td><td>Apstiprināt</td></tr>
+          <tr><td><kbd>E</kbd></td><td>Atvērt labošanu (kursors teksta laukā)</td></tr>
+          <tr><td><kbd>R</kbd></td><td>Pāriet uz noraidīšanas iemeslu</td></tr>
+          <tr><td><kbd>S</kbd></td><td>Izlaist, pāriet uz nākamo</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small muted">Taustiņi nedarbojas, kamēr kursors ir teksta laukā.</p>
+
+    <h2 id="privatums">{me.role === 'admin' ? 9 : 8}. Privātums un drošība</h2>
+    <ul>
+      <li>Nekopējiet atsauksmes, sākotnējos tekstus, e-pastus vai pieprasījumus ārpus CMS (piemēram, čatos vai dokumentos).</li>
+      <li>Nemēģiniet noskaidrot, kas uzrakstīja atsauksmi. Vietne to apzināti nesaglabā.</li>
+      <li>Neapstipriniet atsauksmes par pedagogiem, kurus pazīstat personīgi; izlaidiet tās.</li>
+      <li>Ja aizdomas par uzbrukumu (simtiem atsauksmju īsā laikā), informējiet administratoru.</li>
+      <li>Pēc darba aizveriet pārlūku vai izrakstieties no Cloudflare Access koplietotā datorā.</li>
+    </ul>
+  </article>
+</Admin>

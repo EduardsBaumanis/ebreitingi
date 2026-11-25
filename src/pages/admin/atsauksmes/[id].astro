@@ -1,0 +1,302 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import Score from '../../../components/Score.astro';
+import { formatDate, plural } from '../../../lib/format';
+import {
+  approveReview,
+  approveSuggestedTeacher,
+  assignSuggestionToTeacher,
+  editPublishedReview,
+  getReviewForModeration,
+  parseReason,
+  parseTextEdit,
+  rejectReview,
+  rejectSuggestedTeacher,
+  removeReview,
+  requeueReview,
+  REJECT_REASONS,
+  REVIEW_STATUS_LABELS,
+  type ActionResult,
+} from '../../../lib/moderation';
+import { STATUS_LABELS } from '../../../lib/teachers';
+import { positiveInt } from '../../../lib/validate';
+
+const db = Astro.locals.runtime.env.DB;
+const me = Astro.locals.admin!;
+const id = positiveInt(Astro.params.id);
+let data = id ? await getReviewForModeration(db, id) : null;
+if (!id || !data) return Astro.rewrite('/404');
+
+const queueMode = Astro.url.searchParams.get('rinda') === '1';
+const self = `/admin/atsauksmes/${id}${queueMode ? '?rinda=1' : ''}`;
+const withMsg = (url: string, msg: string) => `${url}${url.includes('?') ? '&' : '?'}msg=${msg}`;
+
+const MESSAGES: Record<string, string> = {
+  approved: 'Atsauksme publicēta.',
+  rejected: 'Atsauksme noraidīta.',
+  edited: 'Teksts saglabāts.',
+  removed: 'Atsauksme noņemta no vietnes.',
+  requeued: 'Atsauksme atgriezta rindā.',
+  'teacher-approved': 'Pedagogs apstiprināts. Tagad var publicēt atsauksmi.',
+  assigned: 'Atsauksme piesaistīta esošajam pedagogam.',
+  'suggestion-rejected': 'Pedagoga ieteikums un tā atsauksmes dzēstas.',
+};
+
+let error: string | null = null;
+let draft: { comment: string; subject: string } | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  const r = data.review;
+  let result: ActionResult = { ok: false, error: 'Nezināma darbība.' };
+  // Where to go after success: in queue mode, finished items move on to the next review.
+  let next = self;
+  let msg = action;
+
+  if (action === 'approve' || action === 'edit-approve') {
+    let edit = null;
+    if (action === 'edit-approve') {
+      const parsed = parseTextEdit(form);
+      draft = parsed.edit;
+      if (parsed.error) result = { ok: false, error: parsed.error };
+      else edit = parsed.edit;
+    }
+    if (action === 'approve' || edit) result = await approveReview(db, r, me.id, edit);
+    msg = 'approved';
+    if (queueMode) next = '/admin/atsauksmes/rinda';
+  } else if (action === 'reject') {
+    const { reason, error: reasonError } = parseReason(form);
+    result = reasonError ? { ok: false, error: reasonError } : await rejectReview(db, r, me.id, reason);
+    msg = 'rejected';
+    if (queueMode) next = '/admin/atsauksmes/rinda';
+    // The suggestion (and with it this review) may have been deleted.
+    else if (r.teacher_status === 'pending') next = '/admin/atsauksmes?statuss=rejected';
+  } else if (action === 'edit') {
+    const parsed = parseTextEdit(form);
+    draft = parsed.edit;
+    result = parsed.error ? { ok: false, error: parsed.error } : await editPublishedReview(db, r, parsed.edit);
+    msg = 'edited';
+  } else if (action === 'remove') {
+    const { reason, error: reasonError } = parseReason(form);
+    result = reasonError ? { ok: false, error: reasonError } : await removeReview(db, r, me.id, reason);
+    msg = 'removed';
+  } else if (action === 'requeue') {
+    result = await requeueReview(db, r);
+    msg = 'requeued';
+  } else if (action === 'teacher-approve') {
+    result = await approveSuggestedTeacher(db, r, form.get('teacher_name'));
+    msg = 'teacher-approved';
+  } else if (action === 'teacher-assign') {
+    const targetId = positiveInt(form.get('target_teacher_id'));
+    result = targetId ? await assignSuggestionToTeacher(db, r, targetId) : { ok: false, error: 'Izvēlieties pedagogu.' };
+    msg = 'assigned';
+  } else if (action === 'teacher-reject') {
+    result = form.get('confirm') === 'on'
+      ? await rejectSuggestedTeacher(db, r)
+      : { ok: false, error: 'Apstipriniet, ka ieteikums un tā atsauksmes tiks dzēstas.' };
+    msg = 'suggestion-rejected';
+    next = queueMode ? '/admin/atsauksmes/rinda' : '/admin/ieteikumi';
+  }
+
+  if (result.ok) return Astro.redirect(withMsg(next, msg), 303);
+  error = result.error;
+  // Reload: the review may have been changed by someone else.
+  data = await getReviewForModeration(db, id);
+  if (!data) return Astro.redirect(withMsg('/admin/atsauksmes/rinda', 'gone'), 303);
+}
+
+const { review: r, scores, tags, otherPendingForTeacher, existingTeachers } = data;
+const message = MESSAGES[Astro.url.searchParams.get('msg') ?? ''];
+const teacherPending = r.teacher_status === 'pending';
+const pendingCount = (await db.prepare(`SELECT COUNT(*) AS n FROM reviews WHERE status = 'pending'`).first<{ n: number }>())?.n ?? 0;
+const editValue = draft ?? { comment: r.comment, subject: r.subject ?? '' };
+---
+
+<Admin title={queueMode ? 'Moderēšanas rinda' : `Atsauksme #${r.id}`}>
+  <div class="toolbar between">
+    {queueMode ? (
+      <span class="muted">Rindā: {pendingCount} {pendingCount === 1 ? 'atsauksme' : 'atsauksmes'}</span>
+    ) : (
+      <a href="/admin/atsauksmes">‹ Visas atsauksmes</a>
+    )}
+    {queueMode && r.status === 'pending' && (
+      <a class="button ghost" href={`/admin/atsauksmes/rinda?pec=${r.id}`} data-shortcut="s">Izlaist <kbd>S</kbd></a>
+    )}
+  </div>
+
+  {message && <div class="notice ok">{message}</div>}
+  {error && <div class="notice err" role="alert">{error}</div>}
+
+  <div class="two-col">
+    <div class="stack">
+      {teacherPending && r.status === 'pending' && (
+        <section class="card suggestion">
+          <h3>Ieteikts jauns pedagogs</h3>
+          <p class="small muted">
+            Skolēns ieteica pedagogu, kura vēl nav vietnē. Pārbaudiet vārdu un izvēlieties, ko darīt, pirms publicējat atsauksmi.
+            {otherPendingForTeacher > 0 && ` Par šo ieteikumu gaida vēl ${plural(otherPendingForTeacher, 'atsauksme', 'atsauksmes')}.`}
+          </p>
+
+          <form method="post" class="stack-form">
+            <input type="hidden" name="action" value="teacher-approve" />
+            <label>
+              Vārds, uzvārds (var izlabot)
+              <input type="text" name="teacher_name" value={r.teacher_name} required maxlength="100" />
+            </label>
+            <div><button type="submit">Apstiprināt pedagogu</button></div>
+          </form>
+
+          {existingTeachers.length > 0 && (
+            <form method="post" class="stack-form footnote">
+              <input type="hidden" name="action" value="teacher-assign" />
+              <label>
+                …vai tas ir esošs pedagogs šajā iestādē?
+                <select name="target_teacher_id" required>
+                  <option value="">Izvēlieties…</option>
+                  {existingTeachers.map((t) => <option value={t.id}>{t.full_name}{t.likely ? ' (līdzīgs vārds)' : ''}</option>)}
+                </select>
+              </label>
+              <div><button type="submit" class="secondary">Piesaistīt esošam pedagogam</button></div>
+            </form>
+          )}
+
+          <form method="post" class="stack-form footnote">
+            <input type="hidden" name="action" value="teacher-reject" />
+            <label class="checkbox">
+              <input type="checkbox" name="confirm" required />
+              <span>Ieteikums nav īsts pedagogs (piemēram, izdomāts vārds). Dzēst to un {plural(otherPendingForTeacher + 1, 'atsauksmi', 'atsauksmes')} par to.</span>
+            </label>
+            <div><button type="submit" class="secondary">Noraidīt ieteikumu</button></div>
+          </form>
+        </section>
+      )}
+
+      <article class="card review moderation-review">
+        <header class="review-head">
+          <Score score={r.overall_score} />
+          <div class="review-context">
+            <div class="review-what">
+              {r.teacher_name}
+              {teacherPending && <span class="badge status-pending">Ieteikts</span>}
+            </div>
+            <div class="small muted">{[r.institution_name, r.subject, r.period].filter(Boolean).join(' · ')}</div>
+          </div>
+          <span class:list={['badge', `review-${r.status}`]}>{REVIEW_STATUS_LABELS[r.status]}</span>
+        </header>
+        <ul class="review-scores">
+          {scores.map((s) => <li><span class="muted">{s.label}</span> <strong>{s.score}</strong></li>)}
+        </ul>
+        <p class="review-text">{r.comment}</p>
+        {tags.length > 0 && (
+          <div class="badges">{tags.map((t) => <span class:list={['badge', 'tag', t.sentiment]}>{t.label}</span>)}</div>
+        )}
+        {r.comment_original && (
+          <details class="original">
+            <summary>Sākotnējais teksts (redzams tikai CMS)</summary>
+            <p class="review-text">{r.comment_original}</p>
+          </details>
+        )}
+        {r.rejection_reason && <p class="small"><strong>Iemesls:</strong> {r.rejection_reason}</p>}
+      </article>
+
+      {r.status === 'pending' && (
+        <section class="card actions">
+          <form method="post" class="form-row">
+            <input type="hidden" name="action" value="approve" />
+            <button type="submit" data-shortcut="a" disabled={teacherPending}>Apstiprināt <kbd>A</kbd></button>
+            {teacherPending && <span class="small muted">Vispirms apstipriniet pedagogu.</span>}
+          </form>
+
+          <details class="footnote" open={draft !== null}>
+            <summary data-shortcut="e">Labot un apstiprināt <kbd>E</kbd></summary>
+            <form method="post" class="stack-form footnote">
+              <input type="hidden" name="action" value="edit-approve" />
+              <p class="small muted">Izņemiet personas datus vai aizskarošus izteicienus. Publiski būs atzīme “Moderatora labots”; sākotnējais teksts paliks redzams tikai CMS.</p>
+              <label>Priekšmets <input type="text" name="subject" value={editValue.subject} maxlength="100" /></label>
+              <label>Teksts <textarea name="comment" rows="8" required>{editValue.comment}</textarea></label>
+              <div><button type="submit" disabled={teacherPending}>Saglabāt un apstiprināt</button></div>
+            </form>
+          </details>
+
+          <form method="post" class="stack-form footnote reject-form">
+            <input type="hidden" name="action" value="reject" />
+            <label>
+              <span>Noraidīšanas iemesls <kbd>R</kbd></span>
+              <select name="reason" required data-shortcut="r">
+                <option value="">Izvēlieties…</option>
+                {REJECT_REASONS.map((reason) => <option value={reason}>{reason}</option>)}
+                <option value="cits">Cits (aprakstiet zemāk)</option>
+              </select>
+            </label>
+            <label><span>Komentārs <span class="subtle">(neobligāti)</span></span> <input type="text" name="reason_custom" maxlength="300" /></label>
+            <div><button type="submit" class="secondary">Noraidīt</button></div>
+          </form>
+        </section>
+      )}
+
+      {r.status === 'approved' && (
+        <section class="card actions">
+          <details open={draft !== null}>
+            <summary>Labot tekstu</summary>
+            <form method="post" class="stack-form footnote">
+              <input type="hidden" name="action" value="edit" />
+              <label>Priekšmets <input type="text" name="subject" value={editValue.subject} maxlength="100" /></label>
+              <label>Teksts <textarea name="comment" rows="8" required>{editValue.comment}</textarea></label>
+              <div><button type="submit">Saglabāt</button></div>
+            </form>
+          </details>
+          <form method="post" class="stack-form footnote">
+            <input type="hidden" name="action" value="remove" />
+            <label>
+              Noņemt no vietnes: iemesls
+              <select name="reason" required>
+                <option value="">Izvēlieties…</option>
+                {REJECT_REASONS.map((reason) => <option value={reason}>{reason}</option>)}
+                <option value="Dzēšanas pieprasījums">Dzēšanas pieprasījums</option>
+                <option value="cits">Cits (aprakstiet zemāk)</option>
+              </select>
+            </label>
+            <label><span>Komentārs <span class="subtle">(neobligāti)</span></span> <input type="text" name="reason_custom" maxlength="300" /></label>
+            <div><button type="submit" class="secondary">Noņemt</button></div>
+          </form>
+        </section>
+      )}
+
+      {(r.status === 'rejected' || r.status === 'removed') && (
+        <section class="card actions">
+          <form method="post" class="form-row">
+            <input type="hidden" name="action" value="requeue" />
+            <button type="submit" class="secondary">Atgriezt rindā</button>
+            <span class="small muted">Atsauksme atkal gaidīs pārbaudi.</span>
+          </form>
+        </section>
+      )}
+    </div>
+
+    <aside class="card">
+      <dl class="details">
+        <dt>Pedagogs</dt>
+        <dd>
+          {r.teacher_status === 'active'
+            ? <a href={`/pedagogi/${r.teacher_slug}`} target="_blank" rel="noopener">{r.teacher_name}</a>
+            : r.teacher_name}
+          <div class="small muted">{STATUS_LABELS[r.teacher_status]} · {r.teacher_review_count} publicētas</div>
+          {me.role === 'admin' && <div class="small"><a href={`/admin/pedagogi/${r.teacher_id}`}>CMS ieraksts</a></div>}
+        </dd>
+        <dt>Iestāde</dt>
+        <dd><a href={`/iestades/${r.institution_slug}`} target="_blank" rel="noopener">{r.institution_name}</a></dd>
+        <dt>Iesniegta</dt>
+        <dd>{formatDate(r.created_at)}</dd>
+        {r.moderated_at && (
+          <>
+            <dt>Apstrādāja</dt>
+            <dd>{formatDate(r.moderated_at)}{r.moderator_email && <div class="small muted">{r.moderator_email}</div>}</dd>
+          </>
+        )}
+      </dl>
+    </aside>
+  </div>
+
+  <script is:inline src="/js/moderation.js" defer></script>
+</Admin>

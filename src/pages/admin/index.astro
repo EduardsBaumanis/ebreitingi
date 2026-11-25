@@ -1,0 +1,91 @@
+---
+import Admin from '../../layouts/Admin.astro';
+import { plural } from '../../lib/format';
+import { allAggregateStatements } from '../../lib/scoring';
+
+const db = Astro.locals.runtime.env.DB;
+const me = Astro.locals.admin!;
+
+let notice: string | null = null;
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  if (form.get('action') === 'recalculate' && me.role === 'admin') {
+    await db.batch(allAggregateStatements(db));
+    return Astro.redirect('/admin?msg=recalculated', 303);
+  }
+}
+if (Astro.url.searchParams.get('msg') === 'recalculated') notice = 'Visi vērtējumi pārrēķināti.';
+
+const counts = await db
+  .prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM reviews          WHERE status = 'pending') AS pending_reviews,
+       (SELECT MIN(created_at) FROM reviews   WHERE status = 'pending') AS oldest_pending,
+       (SELECT COUNT(*) FROM teachers         WHERE status = 'pending') AS pending_teachers,
+       (SELECT COUNT(*) FROM teacher_replies  WHERE status = 'pending') AS pending_replies,
+       (SELECT COUNT(*) FROM removal_requests WHERE status = 'open')    AS open_requests,
+       (SELECT COUNT(*) FROM reviews          WHERE status = 'approved') AS approved_reviews,
+       (SELECT COUNT(*) FROM teachers         WHERE status = 'active')  AS teachers`,
+  )
+  .first<Record<string, number> & { oldest_pending: string | null }>();
+
+// Latvian needs different case endings: "gaida 27 stundas" (accusative), "pirms 27 stundām" (after "pirms").
+function age(sqliteUtc: string | null): { waits: string; ago: string } | null {
+  if (!sqliteUtc) return null;
+  const hours = Math.floor((Date.now() - new Date(sqliteUtc.replace(' ', 'T') + 'Z').getTime()) / 3_600_000);
+  if (hours < 1) return { waits: 'mazāk par stundu', ago: 'nepilnas stundas' };
+  if (hours < 48) return { waits: plural(hours, 'stundu', 'stundas'), ago: plural(hours, 'stundas', 'stundām') };
+  const days = Math.floor(hours / 24);
+  return { waits: plural(days, 'dienu', 'dienas'), ago: plural(days, 'dienas', 'dienām') };
+}
+const oldest = age(counts?.oldest_pending ?? null);
+
+const tiles = [
+  { label: 'Atsauksmes gaida pārbaudi', value: counts?.pending_reviews ?? 0, href: '/admin/atsauksmes', note: oldest ? `vecākā gaida ${oldest.waits}` : null },
+  { label: 'Ieteiktie pedagogi', value: counts?.pending_teachers ?? 0, href: '/admin/ieteikumi', note: null },
+  { label: 'Pedagogu atbildes', value: counts?.pending_replies ?? 0, href: '/admin/atbildes', note: null },
+  { label: 'Dzēšanas pieprasījumi', value: counts?.open_requests ?? 0, href: me.role === 'admin' ? '/admin/pieprasijumi' : null, note: counts?.open_requests ? 'atbilde 30 dienu laikā' : null },
+  { label: 'Publicētas atsauksmes', value: counts?.approved_reviews ?? 0, href: '/admin/atsauksmes?statuss=approved', note: null },
+  { label: 'Aktīvi pedagogi', value: counts?.teachers ?? 0, href: me.role === 'admin' ? '/admin/pedagogi' : null, note: null },
+];
+---
+
+<Admin title="Panelis">
+  {notice && <div class="notice ok">{notice}</div>}
+
+  {(counts?.pending_reviews ?? 0) > 0 && (
+    <div class="card cta-card">
+      <div>
+        <strong>{plural(counts!.pending_reviews, 'atsauksme gaida', 'atsauksmes gaida')} pārbaudi</strong>
+        {oldest && <div class="small muted">Vecākā iesniegta pirms {oldest.ago}.</div>}
+      </div>
+      <a class="button" href="/admin/atsauksmes/rinda">Sākt moderēt</a>
+    </div>
+  )}
+
+  <div class="grid">
+    {tiles.map((t) => {
+      const body = (
+        <>
+          <div class="value">{t.value}</div>
+          <div class="label">{t.label}</div>
+          {t.note && <div class="subtle small">{t.note}</div>}
+        </>
+      );
+      return t.href ? <a class="card stat tile-link" href={t.href}>{body}</a> : <div class="card stat">{body}</div>;
+    })}
+  </div>
+
+  <p class="footnote muted">Jauns moderators? Sāciet ar <a href="/admin/palidziba">moderatora rokasgrāmatu</a>.</p>
+
+  {me.role === 'admin' && (
+    <section class="footnote">
+      <h2>Apkope</h2>
+      <form method="post" class="form-row">
+        <input type="hidden" name="action" value="recalculate" />
+        <button type="submit" class="secondary">Pārrēķināt visus vērtējumus</button>
+        <span class="small muted">Parasti nav vajadzīgs: vērtējumi tiek pārrēķināti automātiski pēc katras izmaiņas.</span>
+      </form>
+    </section>
+  )}
+</Admin>

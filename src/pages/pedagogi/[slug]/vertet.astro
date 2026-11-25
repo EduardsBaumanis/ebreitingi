@@ -1,0 +1,96 @@
+---
+import Base from '../../../layouts/Base.astro';
+import Breadcrumbs from '../../../components/Breadcrumbs.astro';
+import ReviewFields from '../../../components/ReviewFields.astro';
+import { handleReviewPost } from '../../../lib/review-page';
+import { emptyReviewValues, getReviewFormOptions, type ReviewErrors } from '../../../lib/reviews';
+import { getActiveTeacherBySlug } from '../../../lib/teachers';
+import { positiveInt } from '../../../lib/validate';
+
+const env = Astro.locals.runtime.env;
+const db = env.DB;
+const teacher = await getActiveTeacherBySlug(db, Astro.params.slug ?? '');
+if (!teacher) return Astro.rewrite('/404');
+
+const [options, institutionsRes] = await Promise.all([
+  getReviewFormOptions(db),
+  db
+    .prepare(
+      `SELECT i.id, i.name, i.slug FROM teacher_institutions ti
+         JOIN institutions i ON i.id = ti.institution_id AND i.hidden = 0
+        WHERE ti.teacher_id = ?1 ORDER BY i.name_search`,
+    )
+    .bind(teacher.id)
+    .all<{ id: number; name: string; slug: string }>(),
+]);
+const institutions = institutionsRes.results;
+if (!institutions.length) return Astro.rewrite('/404');
+
+let values = emptyReviewValues();
+let errors: ReviewErrors = {};
+let selectedInstitutionId =
+  institutions.find((i) => i.slug === Astro.url.searchParams.get('iestade'))?.id ??
+  (institutions.length === 1 ? institutions[0].id : null);
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  selectedInstitutionId = positiveInt(form.get('institution_id'));
+  const institutionOk = institutions.some((i) => i.id === selectedInstitutionId);
+  const result = await handleReviewPost(
+    env,
+    form,
+    options,
+    institutionOk ? { kind: 'existing', teacherId: teacher.id, institutionId: selectedInstitutionId! } : null,
+    institutionOk ? {} : { institution: 'Izvēlies iestādi, kurā šis pedagogs tevi mācīja.' },
+  );
+  if (result.redirect) return Astro.redirect(result.redirect, 303);
+  values = result.values;
+  errors = result.errors;
+  Astro.response.status = 422;
+}
+
+const errorCount = Object.keys(errors).filter((k) => k !== 'missingCriteria').length;
+---
+
+<Base title={`Novērtēt: ${teacher.full_name}`} noindex>
+  <Breadcrumbs
+    items={[
+      { label: 'Sākums', href: '/' },
+      { label: teacher.full_name, href: `/pedagogi/${teacher.slug}` },
+      { label: 'Novērtēt' },
+    ]}
+  />
+  <div class="form-page">
+    <h1>Novērtēt: {teacher.full_name}</h1>
+    <p class="muted">Atsauksme ir anonīma. Tā parādīsies vietnē pēc tam, kad to būs pārbaudījis moderators.</p>
+
+    {errorCount > 0 && (
+      <div class="notice err" role="alert">
+        {errors.form && errorCount === 1 ? errors.form : 'Lūdzu, izlabo atzīmētās vietas formā.'}
+      </div>
+    )}
+
+    <form method="post" class="review-form">
+      <section class="form-section" aria-labelledby="sec-inst">
+        <h2 id="sec-inst">Iestāde</h2>
+        {institutions.length === 1 ? (
+          <>
+            <input type="hidden" name="institution_id" value={institutions[0].id} />
+            <p>{institutions[0].name}</p>
+          </>
+        ) : (
+          <label>
+            <span>Kurā iestādē šis pedagogs tevi mācīja?</span>
+            <select name="institution_id" required aria-invalid={errors.institution ? 'true' : undefined}>
+              <option value="">Izvēlies…</option>
+              {institutions.map((i) => <option value={i.id} selected={selectedInstitutionId === i.id}>{i.name}</option>)}
+            </select>
+          </label>
+        )}
+        {errors.institution && <p class="field-error">{errors.institution}</p>}
+      </section>
+
+      <ReviewFields options={options} values={values} errors={errors} turnstileSiteKey={env.TURNSTILE_SITE_KEY} />
+    </form>
+  </div>
+</Base>

@@ -1,0 +1,159 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import { adminOnly } from '../../../lib/auth';
+import { formatDate } from '../../../lib/format';
+import { getReviewForModeration, removeReview, REVIEW_STATUS_LABELS, type ReviewStatus } from '../../../lib/moderation';
+import {
+  describeTargetForAdmin,
+  getRequest,
+  RELATION_LABELS,
+  removeTeacherForRequest,
+  resolveRequest,
+  STATUS_LABELS,
+  type RequestStatus,
+} from '../../../lib/removal';
+import { STATUS_LABELS as TEACHER_STATUS_LABELS, type TeacherStatus } from '../../../lib/teachers';
+import { cleanLine, positiveInt } from '../../../lib/validate';
+
+const denied = adminOnly(Astro.locals);
+if (denied) return denied;
+
+const db = Astro.locals.runtime.env.DB;
+const me = Astro.locals.admin!;
+const id = positiveInt(Astro.params.id);
+const request = id ? await getRequest(db, id) : null;
+if (!id || !request) return Astro.rewrite('/404');
+
+const MESSAGES: Record<string, string> = {
+  'teacher-removed': 'Pedagoga lapa noņemta (statuss “Dzēsts (pieprasījums)”).',
+  'review-removed': 'Atsauksme noņemta no vietnes.',
+  resolved: 'Pieprasījums izskatīts.',
+};
+
+let error: string | null = null;
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+  const self = `/admin/pieprasijumi/${id}`;
+
+  if (action === 'remove-teacher' && request.target_type === 'teacher') {
+    await removeTeacherForRequest(db, request.target_id);
+    return Astro.redirect(`${self}?msg=teacher-removed`, 303);
+  }
+  if (action === 'remove-review' && request.target_type === 'review') {
+    const data = await getReviewForModeration(db, request.target_id);
+    const result = data
+      ? await removeReview(db, data.review, me.id, `Dzēšanas pieprasījums #${id}`)
+      : { ok: false as const, error: 'Atsauksme nav atrasta.' };
+    if (result.ok) return Astro.redirect(`${self}?msg=review-removed`, 303);
+    error = result.error;
+  }
+  if (action === 'resolve') {
+    const status = String(form.get('status') ?? '') as RequestStatus;
+    const result = status in STATUS_LABELS
+      ? await resolveRequest(db, id, me.id, status, cleanLine(form.get('note'), 1000))
+      : { ok: false as const, error: 'Izvēlieties lēmumu.' };
+    if (result.ok) return Astro.redirect(`${self}?msg=resolved`, 303);
+    error = result.error;
+  }
+}
+
+const target = await describeTargetForAdmin(db, request);
+const message = MESSAGES[Astro.url.searchParams.get('msg') ?? ''];
+const isOpen = request.status === 'open';
+const mailSubject = encodeURIComponent(`Jūsu pieprasījums #${request.id} (Pedagogu vērtējumi)`);
+---
+
+<Admin title={`Pieprasījums #${request.id}`}>
+  <p class="muted"><a href="/admin/pieprasijumi">‹ Visi pieprasījumi</a></p>
+  {message && <div class="notice ok">{message}</div>}
+  {error && <div class="notice err" role="alert">{error}</div>}
+
+  <div class="two-col">
+    <div class="stack">
+      <section class="card">
+        <h3>Pieprasījums</h3>
+        <p class="review-text">{request.message}</p>
+      </section>
+
+      <section class="card">
+        <h3>Par ko</h3>
+        {target.kind === 'teacher' ? (
+          target.teacher ? (
+            <>
+              <p>
+                <strong>{target.teacher.full_name}</strong>
+                <span class:list={['badge', `status-${target.teacher.status}`]}>{TEACHER_STATUS_LABELS[target.teacher.status as TeacherStatus]}</span>
+              </p>
+              <p class="small muted">{target.teacher.review_count} publicētas atsauksmes</p>
+              <div class="form-row">
+                {target.teacher.status === 'active' && <a class="button ghost" href={`/pedagogi/${target.teacher.slug}`} target="_blank" rel="noopener">Publiskā lapa</a>}
+                <a class="button ghost" href={`/admin/pedagogi/${target.teacher.id}`}>CMS ieraksts</a>
+              </div>
+              {target.teacher.status !== 'removed' && (
+                <form method="post" class="form-row footnote">
+                  <input type="hidden" name="action" value="remove-teacher" />
+                  <button type="submit" class="secondary">Noņemt pedagoga lapu un visas atsauksmes</button>
+                  <span class="small muted">Statuss “Dzēsts (pieprasījums)”; atjaunot var CMS ierakstā.</span>
+                </form>
+              )}
+            </>
+          ) : <p class="muted">Pedagogs vairs neeksistē (iespējams, apvienots ar citu ierakstu).</p>
+        ) : target.review ? (
+          <>
+            <p>
+              Atsauksme par <strong>{target.review.teacher_name}</strong>
+              <span class:list={['badge', `review-${target.review.status}`]}>{REVIEW_STATUS_LABELS[target.review.status as ReviewStatus]}</span>
+              {target.review.edited_by_moderator === 1 && <span class="badge">Labota</span>}
+            </p>
+            <p class="review-text small">{target.review.comment}</p>
+            <div class="form-row footnote">
+              <a class="button ghost" href={`/admin/atsauksmes/${target.review.id}`}>Atvērt moderēšanā (labot)</a>
+              {target.review.status === 'approved' && (
+                <form method="post" class="inline">
+                  <input type="hidden" name="action" value="remove-review" />
+                  <button type="submit" class="secondary">Noņemt atsauksmi</button>
+                </form>
+              )}
+            </div>
+          </>
+        ) : <p class="muted">Atsauksme vairs neeksistē.</p>}
+      </section>
+
+      <section class="card">
+        <h3>Lēmums</h3>
+        {isOpen ? (
+          <form method="post" class="stack-form">
+            <input type="hidden" name="action" value="resolve" />
+            <fieldset class="plain">
+              {(['granted', 'partially_granted', 'denied'] as RequestStatus[]).map((s) => (
+                <label class="radio"><input type="radio" name="status" value={s} required /> <span>{STATUS_LABELS[s]}</span></label>
+              ))}
+            </fieldset>
+            <label>
+              <span>Pamatojums / piezīmes <span class="subtle">(obligāti, ja nav pilnībā apmierināts)</span></span>
+              <textarea name="note" rows="3" maxlength="1000"></textarea>
+            </label>
+            <p class="small muted">Vispirms veiciet vajadzīgās darbības augstāk, tad atzīmējiet lēmumu un nosūtiet atbildi pieprasītājam.</p>
+            <div><button type="submit">Saglabāt lēmumu</button></div>
+          </form>
+        ) : (
+          <>
+            <p><span class:list={['badge', `request-${request.status}`]}>{STATUS_LABELS[request.status]}</span></p>
+            {request.resolution_note && <p class="review-text">{request.resolution_note}</p>}
+            <p class="small muted">{request.resolved_at && formatDate(request.resolved_at)} · {request.resolver_email}</p>
+          </>
+        )}
+      </section>
+    </div>
+
+    <aside class="card">
+      <dl class="details">
+        <dt>Vārds</dt><dd>{request.requester_name}</dd>
+        <dt>E-pasts</dt><dd><a href={`mailto:${request.requester_email}?subject=${mailSubject}`}>{request.requester_email}</a></dd>
+        <dt>Saistība</dt><dd>{RELATION_LABELS[request.relation]}</dd>
+        <dt>Saņemts</dt><dd>{formatDate(request.created_at)}</dd>
+      </dl>
+    </aside>
+  </div>
+</Admin>

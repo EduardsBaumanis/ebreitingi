@@ -1,0 +1,41 @@
+{
+  "name": "pedagogu-vertejumi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro build && wrangler dev",
+    "check": "astro check",
+    "test": "vitest run",
+    "test:a11y": "node scripts/a11y-check.mjs",
+    "launch-check": "node scripts/launch-check.mjs",
+    "backup": "node scripts/backup.mjs",
+    "cf-typegen": "wrangler types",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:staging": "wrangler d1 migrations apply DB --remote --env staging",
+    "db:migrate:production": "wrangler d1 migrations apply DB --remote --env production",
+    "seed:build": "python scripts/build-institutions-seed.py pa_veidiem seed/institutions.sql",
+    "seed:local": "wrangler d1 execute DB --local --file seed/institutions.sql",
+    "seed:staging": "wrangler d1 execute DB --remote --env staging --file seed/institutions.sql",
+    "seed:production": "wrangler d1 execute DB --remote --env production --file seed/institutions.sql",
+    "admin:add": "node scripts/add-admin.mjs",
+    "dev:sample": "wrangler d1 execute DB --local --file scripts/dev-sample-data.sql",
+    "dev:sample:clear": "wrangler d1 execute DB --local --file scripts/dev-sample-clear.sql",
+    "deploy:staging": "astro build && wrangler deploy --env staging",
+    "deploy:production": "astro build && wrangler deploy --env production"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "12.6.13",
+    "astro": "5.18.2",
+    "jose": "6.2.18"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.12",
+    "axe-core": "4.10.2",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4",
+    "wrangler": "4.168.0"
+  }
+}

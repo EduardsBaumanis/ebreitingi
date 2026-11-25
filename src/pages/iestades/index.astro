@@ -1,0 +1,110 @@
+---
+import Base from '../../layouts/Base.astro';
+import Breadcrumbs from '../../components/Breadcrumbs.astro';
+import InstitutionItem from '../../components/InstitutionItem.astro';
+import Pagination from '../../components/Pagination.astro';
+import { formatLocation, plural } from '../../lib/format';
+import { getFilterOptions, listInstitutions, parseListParams, SORTS } from '../../lib/institutions';
+import { veidsFromSlug } from '../../lib/veidi';
+
+const db = Astro.locals.runtime.env.DB;
+const url = Astro.url;
+
+// Tips options depend on the selected Veids, so resolve that first.
+const selectedVeids = veidsFromSlug(url.searchParams.get('veids'));
+const options = await getFilterOptions(db, selectedVeids?.value ?? null);
+const params = parseListParams(url, options);
+const { rows, total, totalPages } = await listInstitutions(db, params);
+
+const hasFilters = Boolean(params.q || params.veids || params.tips || params.vieta);
+const title = params.veids ? `${params.veids.label}: iestādes` : 'Izglītības iestādes';
+// Index the plain list and the per-type pages; keep search/filter combinations out.
+const indexable = !params.q && !params.tips && !params.vieta && params.sort === 'nosaukums' && params.page === 1;
+---
+
+<Base
+  title={title}
+  description={params.veids
+    ? `${params.veids.label} (${params.veids.examples.toLowerCase()}): pedagogu vērtējumi un atsauksmes.`
+    : 'Visas Latvijas izglītības iestādes: skolas, augstskolas, koledžas un citas. Pedagogu vērtējumi un atsauksmes.'}
+  noindex={!indexable}
+  canonicalPath={params.veids ? `/iestades?veids=${params.veids.slug}` : '/iestades'}
+>
+  <Breadcrumbs items={[{ label: 'Sākums', href: '/' }, { label: 'Iestādes' }]} />
+  <h1>{title}</h1>
+  {params.veids && <p class="muted">{params.veids.examples}</p>}
+
+  <form class="card filters" method="get" action="/iestades">
+    <label class="q">
+      Nosaukums
+      <input type="search" name="q" value={params.q} placeholder="Piemēram, Rīgas Valsts 1. ģimnāzija" maxlength="100" />
+    </label>
+    <label>
+      Iestādes veids
+      <select name="veids">
+        <option value="">Visi veidi</option>
+        {options.veidi.map((v) => (
+          <option value={v.info.slug} selected={params.veids?.slug === v.info.slug}>
+            {v.info.label} ({v.count})
+          </option>
+        ))}
+      </select>
+    </label>
+    <label>
+      Tips
+      <select name="tips">
+        <option value="">Visi tipi</option>
+        {options.tipi.map((t) => (
+          <option value={t.value} selected={params.tips === t.value}>{t.value} ({t.count})</option>
+        ))}
+      </select>
+    </label>
+    <label>
+      Atrašanās vieta
+      <select name="vieta">
+        <option value="">Visas vietas</option>
+        {options.vietas.map((v) => (
+          <option value={v.value} selected={params.vieta === v.value}>{formatLocation(v.value)} ({v.count})</option>
+        ))}
+      </select>
+    </label>
+    <label>
+      Kārtot
+      <select name="kartot">
+        {Object.entries(SORTS)
+          .filter(([key]) => key !== 'atbilstiba' || params.q)
+          .map(([key, s]) => (
+            <option value={key} selected={params.sort === key}>{s.label}</option>
+          ))}
+      </select>
+    </label>
+    <div class="actions">
+      <button type="submit">Atlasīt</button>
+      {hasFilters && <a class="button ghost" href="/iestades">Notīrīt</a>}
+    </div>
+  </form>
+
+  <div class="list-head">
+    <strong>{plural(total, 'iestāde', 'iestādes')}</strong>
+    {totalPages > 1 && <span class="muted small">{params.page}. lapa no {totalPages}</span>}
+  </div>
+
+  {rows.length > 0 ? (
+    <ul class="result-list">
+      {rows.map((inst) => <InstitutionItem inst={inst} />)}
+    </ul>
+  ) : (
+    <div class="empty">
+      <p><strong>Neviena iestāde neatbilst izvēlētajiem filtriem.</strong></p>
+      <p>Pamēģini citu nosaukumu vai <a href="/iestades">notīri filtrus</a>.</p>
+    </div>
+  )}
+
+  <Pagination page={params.page} totalPages={totalPages} url={url} />
+
+  {options.vietas.length > 0 && (
+    <p class="subtle small footnote">
+      Ne visām iestādēm datos ir norādīta atrašanās vieta, tāpēc filtrs pēc vietas var neparādīt visas iestādes.
+    </p>
+  )}
+</Base>

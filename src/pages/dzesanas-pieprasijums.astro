@@ -1,0 +1,158 @@
+---
+// Public removal / objection request form (GDPR). Reached from "Pieprasīt dzēšanu" links on a
+// teacher page (?pedagogs=<slug>) or a review (?atsauksme=<id>), or directly with a pasted link.
+import Base from '../layouts/Base.astro';
+import Breadcrumbs from '../components/Breadcrumbs.astro';
+import {
+  MESSAGE_MAX,
+  MESSAGE_MIN,
+  parseRequestForm,
+  RELATION_LABELS,
+  resolveTarget,
+  submitRequest,
+  type Relation,
+  type RequestTarget,
+  type RequestValues,
+} from '../lib/removal';
+import { TURNSTILE_MESSAGES, verifyTurnstile } from '../lib/turnstile';
+
+const env = Astro.locals.runtime.env;
+const db = env.DB;
+const sp = Astro.url.searchParams;
+const sent = sp.get('nosutits') === '1';
+
+let target: RequestTarget | null = await resolveTarget(db, { teacherSlug: sp.get('pedagogs'), reviewId: sp.get('atsauksme') });
+let link = '';
+let values: RequestValues = { name: '', email: '', relation: '', message: '', consent: false };
+let errors: Record<string, string> = {};
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  link = String(form.get('link') ?? '').slice(0, 500);
+  target = await resolveTarget(db, {
+    teacherSlug: String(form.get('target_slug') ?? '') || null,
+    reviewId: String(form.get('target_review') ?? '') || null,
+    link,
+  });
+  const parsed = parseRequestForm(form);
+  values = parsed.values;
+  errors = parsed.errors;
+  if (!target) errors.link = 'Neizdevās atrast lapu vai atsauksmi. Ielīmējiet saiti uz pedagoga lapu vai konkrēto atsauksmi.';
+
+  if (!Object.keys(errors).length && target) {
+    const turnstile = await verifyTurnstile(
+      String(form.get('cf-turnstile-response') ?? '') || null,
+      (env as { TURNSTILE_SECRET_KEY?: string }).TURNSTILE_SECRET_KEY,
+    );
+    if (!turnstile.ok) errors.form = TURNSTILE_MESSAGES[turnstile.reason];
+    else {
+      await submitRequest(db, target, values);
+      return Astro.redirect('/dzesanas-pieprasijums?nosutits=1', 303);
+    }
+  }
+  Astro.response.status = 422;
+}
+
+const teacherSlug = target?.type === 'teacher' ? target.url.split('/').pop() : '';
+---
+
+<Base title="Dzēšanas vai pārskatīšanas pieprasījums" noindex>
+  <Breadcrumbs items={[{ label: 'Sākums', href: '/' }, { label: 'Dzēšanas pieprasījums' }]} />
+  <div class="form-page">
+    <h1>Dzēšanas vai pārskatīšanas pieprasījums</h1>
+
+    {sent ? (
+      <div class="thanks">
+        <div class="thanks-icon" aria-hidden="true">✓</div>
+        <p class="lead">Paldies! Pieprasījums saņemts.</p>
+        <p class="muted">
+          Mēs to izskatīsim un atbildēsim uz norādīto e-pastu ne vēlāk kā 30 dienu laikā.
+        </p>
+        <p><a class="button" href="/">Uz sākumlapu</a></p>
+      </div>
+    ) : (
+      <>
+        <p class="muted">
+          Ja uzskatāt, ka pedagoga lapa vai atsauksme pārkāpj <a href="/noteikumi">noteikumus</a> vai jūsu tiesības, vai
+          vēlaties iebilst pret savu datu apstrādi, aizpildiet šo formu. Katru pieprasījumu izskata administrators.
+        </p>
+
+        {Object.keys(errors).length > 0 && (
+          <div class="notice err" role="alert">{errors.form ?? 'Lūdzu, izlabojiet atzīmētās vietas formā.'}</div>
+        )}
+
+        <form method="post" class="review-form">
+          <section class="form-section">
+            <h2>Par ko ir pieprasījums</h2>
+            {target ? (
+              <div class="card">
+                <strong>{target.title}</strong>
+                {target.detail && <p class="review-text small muted footnote">{target.detail}</p>}
+                <input type="hidden" name={target.type === 'teacher' ? 'target_slug' : 'target_review'} value={target.type === 'teacher' ? teacherSlug : target.id} />
+              </div>
+            ) : (
+              <label>
+                <span>Saite uz pedagoga lapu vai atsauksmi</span>
+                <input type="text" inputmode="url" name="link" value={link} required maxlength="500" placeholder="…/pedagogi/vards-uzvards" aria-invalid={errors.link ? 'true' : undefined} />
+              </label>
+            )}
+            {errors.link && <p class="field-error">{errors.link}</p>}
+          </section>
+
+          <section class="form-section">
+            <h2>Jūsu dati</h2>
+            <div class="form-grid">
+              <label>
+                <span>Vārds, uzvārds</span>
+                <input type="text" name="name" value={values.name} required maxlength="100" autocomplete="name" aria-invalid={errors.name ? 'true' : undefined} />
+                {errors.name && <span class="field-error">{errors.name}</span>}
+              </label>
+              <label>
+                <span>E-pasts atbildei</span>
+                <input type="email" name="email" value={values.email} required maxlength="254" autocomplete="email" aria-invalid={errors.email ? 'true' : undefined} />
+                {errors.email && <span class="field-error">{errors.email}</span>}
+              </label>
+            </div>
+            <fieldset class="plain footnote">
+              <legend class="label-text">Jūsu saistība ar šo saturu</legend>
+              {(Object.keys(RELATION_LABELS) as Relation[]).map((r) => (
+                <label class="radio">
+                  <input type="radio" name="relation" value={r} required checked={values.relation === r} />
+                  <span>{RELATION_LABELS[r]}</span>
+                </label>
+              ))}
+            </fieldset>
+            {errors.relation && <p class="field-error">{errors.relation}</p>}
+          </section>
+
+          <section class="form-section">
+            <h2><label for="message">Pieprasījuma apraksts</label></h2>
+            <p class="muted small" id="message-hint">
+              Ko vēlaties, lai mēs darām (piemēram, dzēst lapu, dzēst vai labot atsauksmi), un kāpēc.
+            </p>
+            <textarea id="message" name="message" rows="7" minlength={MESSAGE_MIN} maxlength={MESSAGE_MAX} required aria-describedby="message-hint" aria-invalid={errors.message ? 'true' : undefined}>{values.message}</textarea>
+            {errors.message && <p class="field-error">{errors.message}</p>}
+          </section>
+
+          <section class="form-section">
+            <label class="checkbox">
+              <input type="checkbox" name="consent" required checked={values.consent} />
+              <span>
+                Piekrītu, ka mans vārds un e-pasts tiek izmantoti tikai šī pieprasījuma izskatīšanai un saziņai par to.
+                Dati tiek dzēsti 12 mēnešus pēc pieprasījuma izskatīšanas.
+              </span>
+            </label>
+            {errors.consent && <p class="field-error">{errors.consent}</p>}
+          </section>
+
+          <section class="form-section">
+            <div class="cf-turnstile" data-sitekey={env.TURNSTILE_SITE_KEY} data-language="lv" data-theme="auto"></div>
+            <noscript><p class="field-error">Lai nosūtītu pieprasījumu, pārlūkā jāieslēdz JavaScript (robotu pārbaudei).</p></noscript>
+            <button type="submit" class="large">Nosūtīt pieprasījumu</button>
+          </section>
+        </form>
+        <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+      </>
+    )}
+  </div>
+</Base>

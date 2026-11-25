@@ -1,0 +1,60 @@
+---
+// Review rules (plan.md §7 moderation guidelines). Final wording goes through legal review
+// in week 7/8, together with the privacy policy and the removal request form.
+import Base from '../layouts/Base.astro';
+import Breadcrumbs from '../components/Breadcrumbs.astro';
+---
+
+<Base title="Atsauksmju noteikumi" description="Kādas atsauksmes var publicēt vietnē Pedagogu vērtējumi un kā notiek moderēšana.">
+  <Breadcrumbs items={[{ label: 'Sākums', href: '/' }, { label: 'Noteikumi' }]} />
+  <article class="prose">
+    <h1>Atsauksmju noteikumi</h1>
+    <p class="lead">
+      Vietnes mērķis ir palīdzēt skolēniem un studentiem dalīties pieredzē par mācību kvalitāti un palīdzēt pedagogiem
+      saņemt atgriezenisko saiti. Lūdzu, raksti godīgi un ar cieņu.
+    </p>
+
+    <h2>Ko var rakstīt</h2>
+    <ul>
+      <li>Savu pieredzi mācībās pie šī pedagoga: kā tika skaidrota viela, kā notika vērtēšana, vai varēja saņemt palīdzību.</li>
+      <li>Gan pozitīvas, gan kritiskas atsauksmes. Atsauksme netiek noraidīta tikai tāpēc, ka tā ir negatīva.</li>
+      <li>Konkrētus piemērus un ieteikumus, kas varētu uzlabot mācības.</li>
+    </ul>
+
+    <h2>Ko nedrīkst rakstīt</h2>
+    <p>Moderators noraidīs atsauksmi vai izņems tās daļu, ja tajā ir:</p>
+    <ul>
+      <li>apvainojumi, draudi vai diskriminējoši izteicieni;</li>
+      <li>apgalvojumi par pedagoga privāto dzīvi, izskatu vai veselību;</li>
+      <li>nepārbaudāmi apsūdzības par noziegumiem vai pārkāpumiem;</li>
+      <li>citu skolēnu, studentu vai trešo personu vārdi;</li>
+      <li>kontaktinformācija (tālruņi, e-pasti, adreses) un saites;</li>
+      <li>reklāma, surogātpasts vai saturs, kas nav saistīts ar mācībām;</li>
+      <li>atsauksmes par pedagogu, kurš tevi nav mācījis.</li>
+    </ul>
+    <p>
+      Ja moderators izņem daļu teksta, pie atsauksmes būs atzīme “Moderatora labots”.
+    </p>
+
+    <h2>Anonimitāte</h2>
+    <p>
+      Lai uzrakstītu atsauksmi, nav jāreģistrējas. Mēs nesaglabājam tavu vārdu, e-pastu, IP adresi vai citus datus, kas
+      ļautu tevi identificēt, un pie atsauksmēm publiski rādām tikai mēnesi un gadu. Lūdzu, neraksti atsauksmē informāciju,
+      pēc kuras tevi varētu atpazīt. Sīkāk: <a href="/privatuma-politika">privātuma politika</a>.
+    </p>
+
+    <h2>Moderēšana</h2>
+    <p>
+      Katru atsauksmi un katru jauno pedagoga ieteikumu pirms publicēšanas pārbauda moderators. Robotu un automātisku
+      iesniegumu atturēšanai izmantojam Cloudflare Turnstile pārbaudi.
+    </p>
+
+    <h2>Pedagogiem</h2>
+    <p>
+      Pedagogs var publiski atbildēt uz atsauksmi (saite “Esmu šis pedagogs: atbildēt” pie katras atsauksmes); atbildi
+      pirms publicēšanas pārbauda moderators. Ja uzskati, ka atsauksme vai pedagoga lapa pārkāpj šos noteikumus vai tavas
+      tiesības, vari <a href="/dzesanas-pieprasijums">pieprasīt tās pārskatīšanu vai dzēšanu</a>. Pieprasījumus izskatām
+      30 dienu laikā.
+    </p>
+  </article>
+</Base>

@@ -1,0 +1,78 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import Pagination from '../../../components/Pagination.astro';
+import Score from '../../../components/Score.astro';
+import { formatDate } from '../../../lib/format';
+import { listReviews, reviewStatusCounts, REVIEW_STATUS_LABELS, type ReviewStatus } from '../../../lib/moderation';
+import { cleanLine } from '../../../lib/validate';
+
+const db = Astro.locals.runtime.env.DB;
+const sp = Astro.url.searchParams;
+const statusParam = sp.get('statuss') as ReviewStatus | null;
+const status: ReviewStatus = statusParam && statusParam in REVIEW_STATUS_LABELS ? statusParam : 'pending';
+const q = cleanLine(sp.get('q'), 100);
+const pageNum = Number.parseInt(sp.get('lapa') ?? '1', 10);
+const page = Number.isFinite(pageNum) && pageNum > 0 ? pageNum : 1;
+
+const [counts, list] = await Promise.all([reviewStatusCounts(db), listReviews(db, { status, q, page })]);
+const message = sp.get('msg') ? 'Gatavs.' : null;
+
+function excerpt(text: string, max = 140) {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length <= max ? clean : clean.slice(0, max).trimEnd() + '…';
+}
+---
+
+<Admin title="Atsauksmes">
+  {message && <div class="notice ok">{message}</div>}
+
+  <div class="toolbar between">
+    <nav class="tabs" aria-label="Statuss">
+      {(Object.keys(REVIEW_STATUS_LABELS) as ReviewStatus[]).map((s) => (
+        <a href={`/admin/atsauksmes?statuss=${s}`} aria-current={s === status ? 'page' : undefined}>
+          {REVIEW_STATUS_LABELS[s]} <span class="tab-count">{counts[s]}</span>
+        </a>
+      ))}
+    </nav>
+    {counts.pending > 0 && <a class="button" href="/admin/atsauksmes/rinda">Sākt moderēt ({counts.pending})</a>}
+  </div>
+
+  <form method="get" class="form-row admin-filters">
+    <input type="hidden" name="statuss" value={status} />
+    <label class="grow">
+      Pedagogs vai iestāde
+      <input type="search" name="q" value={q} maxlength="100" />
+    </label>
+    <button type="submit">Meklēt</button>
+    {q && <a class="button ghost" href={`/admin/atsauksmes?statuss=${status}`}>Notīrīt</a>}
+  </form>
+
+  {list.rows.length > 0 ? (
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>Pedagogs / iestāde</th><th>Teksts</th><th>Iesniegta</th></tr></thead>
+        <tbody>
+          {list.rows.map((r) => (
+            <tr>
+              <td><Score score={r.overall_score} /></td>
+              <td>
+                <a href={`/admin/atsauksmes/${r.id}`}>{r.teacher_name}</a>
+                {r.teacher_status === 'pending' && <span class="badge status-pending">Ieteikts</span>}
+                <div class="small muted">{r.institution_name}</div>
+              </td>
+              <td class="small">
+                {excerpt(r.comment)}
+                {r.edited_by_moderator === 1 && <span class="badge">Labots</span>}
+              </td>
+              <td class="small muted nowrap">{formatDate(r.created_at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  ) : (
+    <div class="empty"><p>Nav atsauksmju ar statusu “{REVIEW_STATUS_LABELS[status]}”{q && ` pēc “${q}”`}.</p></div>
+  )}
+
+  <Pagination page={page} totalPages={list.totalPages} url={Astro.url} />
+</Admin>

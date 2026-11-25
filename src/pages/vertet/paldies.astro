@@ -1,0 +1,27 @@
+---
+import Base from '../../layouts/Base.astro';
+import { getActiveTeacherBySlug } from '../../lib/teachers';
+
+const db = Astro.locals.runtime.env.DB;
+const slug = Astro.url.searchParams.get('pedagogs');
+const teacher = slug ? await getActiveTeacherBySlug(db, slug) : null;
+const suggested = Astro.url.searchParams.get('ieteikts') === '1';
+---
+
+<Base title="Paldies!" noindex>
+  <div class="form-page thanks">
+    <div class="thanks-icon" aria-hidden="true">✓</div>
+    <h1>Paldies!</h1>
+    <p class="lead">Atsauksme tiks publicēta pēc moderatora pārbaudes.</p>
+    {suggested && (
+      <p class="muted">
+        Arī tevis ieteiktais pedagogs parādīsies vietnē, kad moderators būs pārbaudījis ieteikumu.
+      </p>
+    )}
+    <p class="muted">Parasti pārbaude aizņem dažas dienas. Ja atsauksme neatbildīs noteikumiem, tā netiks publicēta.</p>
+    <div class="form-row footnote">
+      {teacher && <a class="button" href={`/pedagogi/${teacher.slug}`}>Atpakaļ pie: {teacher.full_name}</a>}
+      <a class:list={['button', teacher && 'ghost']} href="/vertet">Novērtēt vēl kādu pedagogu</a>
+    </div>
+  </div>
+</Base>

@@ -1,0 +1,42 @@
+---
+interface Props {
+  page: number;
+  totalPages: number;
+  /** Current URL; other query parameters are kept. */
+  url: URL;
+  param?: string;
+}
+
+const { page, totalPages, url, param = 'lapa' } = Astro.props;
+
+function href(p: number) {
+  const u = new URL(url);
+  if (p === 1) u.searchParams.delete(param);
+  else u.searchParams.set(param, String(p));
+  return u.pathname + u.search;
+}
+
+// 1 … 4 5 [6] 7 8 … 20
+const pages: (number | 'gap')[] = [];
+const windowSize = 2;
+for (let p = 1; p <= totalPages; p++) {
+  if (p === 1 || p === totalPages || Math.abs(p - page) <= windowSize) pages.push(p);
+  else if (pages[pages.length - 1] !== 'gap') pages.push('gap');
+}
+---
+
+{totalPages > 1 && (
+  <nav class="pagination" aria-label="Lapas">
+    {page > 1 && <a href={href(page - 1)} rel="prev">‹ Iepriekšējā</a>}
+    {pages.map((p) =>
+      p === 'gap' ? (
+        <span class="gap" aria-hidden="true">…</span>
+      ) : p === page ? (
+        <span aria-current="page">{p}</span>
+      ) : (
+        <a href={href(p)} aria-label={`${p}. lapa`}>{p}</a>
+      ),
+    )}
+    {page < totalPages && <a href={href(page + 1)} rel="next">Nākamā ›</a>}
+  </nav>
+)}

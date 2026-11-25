@@ -1,0 +1,116 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import Pagination from '../../../components/Pagination.astro';
+import InstitutionPicker from '../../../components/admin/InstitutionPicker.astro';
+import { adminOnly } from '../../../lib/auth';
+import { createTeacherFromForm, listTeachersAdmin, type PickerState } from '../../../lib/admin-teachers';
+import { formatDate } from '../../../lib/format';
+import { SOURCE_LABELS, STATUS_LABELS, type TeacherStatus } from '../../../lib/teachers';
+
+const denied = adminOnly(Astro.locals);
+if (denied) return denied;
+
+const db = Astro.locals.runtime.env.DB;
+
+// --- Create form -----------------------------------------------------------
+let formError: string | null = null;
+let picker: PickerState = { institutionInput: '', candidates: [], error: null };
+let formValues = { fullName: '', subjects: '' };
+let openForm = false;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const result = await createTeacherFromForm(db, form);
+  if ('redirect' in result) return Astro.redirect(result.redirect, 303);
+  formError = result.error;
+  picker = result.picker;
+  formValues = { fullName: result.fullName, subjects: result.subjects };
+  openForm = true;
+}
+
+// --- List ------------------------------------------------------------------
+const sp = Astro.url.searchParams;
+const q = (sp.get('q') ?? '').trim().slice(0, 100);
+const statusParam = sp.get('statuss') as TeacherStatus | null;
+const status = statusParam && statusParam in STATUS_LABELS ? statusParam : null;
+const pageNum = Number.parseInt(sp.get('lapa') ?? '1', 10);
+const page = Number.isFinite(pageNum) && pageNum > 0 ? pageNum : 1;
+
+const { rows, total, totalPages } = await listTeachersAdmin(db, { q, status, page });
+const counts = await db
+  .prepare(`SELECT status, COUNT(*) AS n FROM teachers GROUP BY status`)
+  .all<{ status: TeacherStatus; n: number }>();
+const countByStatus = Object.fromEntries(counts.results.map((r) => [r.status, r.n])) as Partial<Record<TeacherStatus, number>>;
+---
+
+<Admin title="Pedagogi">
+  <div class="toolbar">
+    <a class="button secondary" href="/admin/pedagogi/imports">Importēt no CSV</a>
+  </div>
+
+  <details class="card" open={openForm}>
+    <summary><strong>Pievienot pedagogu</strong></summary>
+    {formError && <div class="notice err">{formError}</div>}
+    <form method="post" class="stack-form">
+      <label class="grow">
+        Vārds, uzvārds
+        <input type="text" name="full_name" value={formValues.fullName} required maxlength="100" />
+      </label>
+      <InstitutionPicker value={picker.institutionInput} candidates={picker.candidates} />
+      <label class="grow">
+        <span>Mācību priekšmeti <span class="subtle">(neobligāti)</span></span>
+        <input type="text" name="subjects" value={formValues.subjects} maxlength="200" placeholder="Piemēram, Matemātika, Fizika" />
+      </label>
+      <div><button type="submit">Pievienot</button></div>
+    </form>
+  </details>
+
+  <form method="get" class="form-row admin-filters">
+    <label class="grow">
+      Meklēt pēc vārda
+      <input type="search" name="q" value={q} maxlength="100" />
+    </label>
+    <label>
+      Statuss
+      <select name="statuss">
+        <option value="">Visi ({Object.values(countByStatus).reduce((a, b) => a + (b ?? 0), 0)})</option>
+        {(Object.keys(STATUS_LABELS) as TeacherStatus[]).map((s) => (
+          <option value={s} selected={status === s}>{STATUS_LABELS[s]} ({countByStatus[s] ?? 0})</option>
+        ))}
+      </select>
+    </label>
+    <button type="submit">Atlasīt</button>
+    {(q || status) && <a class="button ghost" href="/admin/pedagogi">Notīrīt</a>}
+  </form>
+
+  <p class="muted small">Atrasti {total}.</p>
+
+  {rows.length > 0 ? (
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Vārds</th><th>Iestādes</th><th>Statuss</th><th>Atsauksmes</th><th>Avots</th><th>Pievienots</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((t) => (
+            <tr>
+              <td><a href={`/admin/pedagogi/${t.id}`}>{t.full_name}</a></td>
+              <td class="small">{t.institutions ?? '—'}</td>
+              <td><span class:list={['badge', `status-${t.status}`]}>{STATUS_LABELS[t.status]}</span></td>
+              <td class="small">
+                {t.review_count}
+                {t.pending_reviews > 0 && <span class="subtle"> (+{t.pending_reviews} gaida)</span>}
+              </td>
+              <td class="small muted">{SOURCE_LABELS[t.source] ?? t.source}</td>
+              <td class="small muted">{formatDate(t.created_at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  ) : (
+    <div class="empty"><p>Neviens pedagogs neatbilst atlasei.</p></div>
+  )}
+
+  <Pagination page={page} totalPages={totalPages} url={Astro.url} />
+</Admin>

@@ -1,0 +1,58 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import { adminOnly } from '../../../lib/auth';
+import { formatDate } from '../../../lib/format';
+import { listRequests, RELATION_LABELS, STATUS_LABELS } from '../../../lib/removal';
+
+const denied = adminOnly(Astro.locals);
+if (denied) return denied;
+
+const db = Astro.locals.runtime.env.DB;
+const showResolved = Astro.url.searchParams.get('statuss') === 'izskatiti';
+const requests = await listRequests(db, !showResolved);
+
+function daysLeft(createdAt: string) {
+  const days = Math.floor((Date.now() - new Date(createdAt.replace(' ', 'T') + 'Z').getTime()) / 86_400_000);
+  return 30 - days;
+}
+---
+
+<Admin title="Dzēšanas pieprasījumi">
+  <div class="toolbar between">
+    <nav class="tabs" aria-label="Statuss">
+      <a href="/admin/pieprasijumi" aria-current={!showResolved ? 'page' : undefined}>Atvērtie</a>
+      <a href="/admin/pieprasijumi?statuss=izskatiti" aria-current={showResolved ? 'page' : undefined}>Izskatītie</a>
+    </nav>
+  </div>
+  <p class="muted small">GDPR prasa atbildēt ne vēlāk kā 30 dienu laikā. Atbildi pieprasītājam sūtiet no sava e-pasta.</p>
+
+  {requests.length === 0 ? (
+    <div class="empty"><p>{showResolved ? 'Vēl nav izskatītu pieprasījumu.' : 'Nav atvērtu pieprasījumu.'}</p></div>
+  ) : (
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Pieprasītājs</th><th>Par ko</th><th>Saņemts</th><th>{showResolved ? 'Lēmums' : 'Termiņš'}</th></tr></thead>
+        <tbody>
+          {requests.map((q) => {
+            const left = daysLeft(q.created_at);
+            return (
+              <tr>
+                <td>
+                  <a href={`/admin/pieprasijumi/${q.id}`}>{q.requester_name}</a>
+                  <div class="small muted">{RELATION_LABELS[q.relation]}</div>
+                </td>
+                <td class="small">{q.target_type === 'teacher' ? 'Pedagoga lapa' : 'Atsauksme'} #{q.target_id}</td>
+                <td class="small muted nowrap">{formatDate(q.created_at)}</td>
+                <td class="small">
+                  {showResolved
+                    ? <span class:list={['badge', `request-${q.status}`]}>{STATUS_LABELS[q.status]}</span>
+                    : <span class:list={['badge', left <= 7 ? 'request-denied' : 'request-open']}>{left >= 0 ? `${left} d.` : `kavēts ${-left} d.`}</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  )}
+</Admin>

@@ -1,0 +1,35 @@
+---
+// Institution field for CMS forms, no JavaScript needed: the admin types a name or registration
+// number; if the server can't pick exactly one, the form comes back with candidates to choose from.
+import { formatLocation } from '../../lib/format';
+import type { InstitutionChoice } from '../../lib/teachers';
+
+interface Props {
+  value?: string;
+  candidates?: InstitutionChoice[];
+  /** Pre-selected candidate id. */
+  selectedId?: number | null;
+}
+
+const { value = '', candidates = [], selectedId = null } = Astro.props;
+---
+
+<label class="grow">
+  Iestāde (nosaukums vai reģistrācijas numurs)
+  <input type="text" name="institution" value={value} maxlength="200" required={candidates.length === 0} />
+</label>
+
+{candidates.length > 0 && (
+  <fieldset class="candidates">
+    <legend>Atrastas vairākas iestādes. Izvēlies vienu:</legend>
+    {candidates.map((c, i) => (
+      <label class="radio">
+        <input type="radio" name="institution_id" value={c.id} required checked={selectedId ? selectedId === c.id : i === 0} />
+        <span>
+          {c.name}
+          <span class="subtle small"> · {c.reg_number}{c.location ? ` · ${formatLocation(c.location)}` : ''}</span>
+        </span>
+      </label>
+    ))}
+  </fieldset>
+)}

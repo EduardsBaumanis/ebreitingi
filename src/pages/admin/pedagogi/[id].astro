@@ -1,0 +1,244 @@
+---
+import Admin from '../../../layouts/Admin.astro';
+import InstitutionPicker from '../../../components/admin/InstitutionPicker.astro';
+import { adminOnly } from '../../../lib/auth';
+import {
+  EDITABLE_STATUSES,
+  getTeacherAdmin,
+  mergeTeachers,
+  pickInstitution,
+  updateTeacher,
+  type PickerState,
+} from '../../../lib/admin-teachers';
+import { formatDate, formatScore } from '../../../lib/format';
+import { SOURCE_LABELS, STATUS_LABELS } from '../../../lib/teachers';
+import { cleanLine, positiveInt, SUBJECTS_MAX } from '../../../lib/validate';
+
+const denied = adminOnly(Astro.locals);
+if (denied) return denied;
+
+const db = Astro.locals.runtime.env.DB;
+const id = positiveInt(Astro.params.id);
+const data = id ? await getTeacherAdmin(db, id) : null;
+if (!id || !data) return Astro.rewrite('/404');
+
+const MESSAGES: Record<string, { ok: boolean; text: string }> = {
+  created: { ok: true, text: 'Pedagogs pievienots.' },
+  saved: { ok: true, text: 'Izmaiņas saglabātas.' },
+  'link-added': { ok: true, text: 'Iestāde pievienota.' },
+  'link-saved': { ok: true, text: 'Priekšmeti saglabāti.' },
+  'link-removed': { ok: true, text: 'Iestāde noņemta.' },
+  'last-link': { ok: false, text: 'Pedagogam jābūt piesaistītam vismaz vienai iestādei.' },
+  merged: { ok: true, text: 'Ieraksti apvienoti. Vecā adrese tagad pāradresē uz šo pedagogu.' },
+};
+
+let error: string | null = null;
+let picker: PickerState = { institutionInput: '', candidates: [], error: null };
+let linkSubjects = '';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  const self = `/admin/pedagogi/${id}`;
+
+  if (action === 'update') {
+    const result = await updateTeacher(db, id, form, data.teacher);
+    if (!result.error) return Astro.redirect(`${self}?msg=saved`, 303);
+    error = result.error;
+  } else if (action === 'link-add') {
+    linkSubjects = cleanLine(form.get('subjects'), SUBJECTS_MAX);
+    const picked = await pickInstitution(db, form);
+    picker = picked.state;
+    if (picked.institution) {
+      await db
+        .prepare(
+          `INSERT INTO teacher_institutions (teacher_id, institution_id, subjects) VALUES (?1, ?2, ?3)
+           ON CONFLICT(teacher_id, institution_id) DO UPDATE SET subjects = COALESCE(excluded.subjects, subjects)`,
+        )
+        .bind(id, picked.institution.id, linkSubjects || null)
+        .run();
+      return Astro.redirect(`${self}?msg=link-added`, 303);
+    }
+    error = picker.error;
+  } else if (action === 'link-update' || action === 'link-remove') {
+    const institutionId = positiveInt(form.get('institution_id'));
+    if (institutionId && action === 'link-update') {
+      await db
+        .prepare(`UPDATE teacher_institutions SET subjects = ?1 WHERE teacher_id = ?2 AND institution_id = ?3`)
+        .bind(cleanLine(form.get('subjects'), SUBJECTS_MAX) || null, id, institutionId)
+        .run();
+      return Astro.redirect(`${self}?msg=link-saved`, 303);
+    }
+    if (institutionId && action === 'link-remove') {
+      if (data.links.length <= 1) return Astro.redirect(`${self}?msg=last-link`, 303);
+      // Reviews keep their institution; the institution just stops listing this teacher.
+      await db
+        .prepare(`DELETE FROM teacher_institutions WHERE teacher_id = ?1 AND institution_id = ?2`)
+        .bind(id, institutionId)
+        .run();
+      return Astro.redirect(`${self}?msg=link-removed`, 303);
+    }
+    error = 'Nederīgs pieprasījums.';
+  } else if (action === 'merge') {
+    const targetId = positiveInt(form.get('target_id')) ?? positiveInt(form.get('target_id_manual'));
+    if (form.get('confirm') !== 'on') error = 'Apstipriniet apvienošanu.';
+    else if (!targetId) error = 'Izvēlieties, ar kuru pedagogu apvienot.';
+    else {
+      const result = await mergeTeachers(db, id, targetId);
+      if (result.ok) return Astro.redirect(`/admin/pedagogi/${targetId}?msg=merged`, 303);
+      error = result.error;
+    }
+  } else {
+    error = 'Nezināma darbība.';
+  }
+}
+
+const { teacher, links, sameName } = data;
+const message = MESSAGES[Astro.url.searchParams.get('msg') ?? ''];
+---
+
+<Admin title={teacher.full_name}>
+  <p class="muted"><a href="/admin/pedagogi">‹ Visi pedagogi</a></p>
+
+  {message && <div class:list={['notice', message.ok ? 'ok' : 'err']}>{message.text}</div>}
+  {error && <div class="notice err">{error}</div>}
+
+  <div class="two-col">
+    <div class="stack">
+      <section class="card">
+        <h3>Pamatdati</h3>
+        <form method="post" class="stack-form">
+          <input type="hidden" name="action" value="update" />
+          <label>
+            Vārds, uzvārds
+            <input type="text" name="full_name" value={teacher.full_name} required maxlength="100" />
+          </label>
+          <label>
+            Statuss
+            <select name="status">
+              {EDITABLE_STATUSES.map((s) => <option value={s} selected={teacher.status === s}>{STATUS_LABELS[s]}</option>)}
+            </select>
+          </label>
+          <p class="subtle small">
+            Paslēpts pedagogs nav redzams publiski, un viņa atsauksmes netiek ieskaitītas iestāžu vērtējumā.
+            “Dzēsts (pieprasījums)” izmanto pēc GDPR dzēšanas pieprasījuma: šādu pedagogu nevar atkārtoti importēt.
+          </p>
+          <div><button type="submit">Saglabāt</button></div>
+        </form>
+      </section>
+
+      <section class="card">
+        <h3>Iestādes</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Iestāde</th><th>Priekšmeti</th><th>Atsauksmes</th><th></th></tr></thead>
+            <tbody>
+              {links.map((l) => (
+                <tr>
+                  <td>
+                    <a href={`/iestades/${l.slug}`} target="_blank" rel="noopener">{l.name}</a>
+                    <div class="subtle small">{l.reg_number}</div>
+                  </td>
+                  <td>
+                    <form method="post" class="inline">
+                      <input type="hidden" name="action" value="link-update" />
+                      <input type="hidden" name="institution_id" value={l.id} />
+                      <input type="text" name="subjects" value={l.subjects ?? ''} maxlength="200" aria-label={`Priekšmeti: ${l.name}`} />
+                      <button type="submit" class="secondary">Saglabāt</button>
+                    </form>
+                  </td>
+                  <td class="small">{l.reviews}</td>
+                  <td>
+                    <form method="post" class="inline">
+                      <input type="hidden" name="action" value="link-remove" />
+                      <input type="hidden" name="institution_id" value={l.id} />
+                      <button type="submit" class="secondary" disabled={links.length <= 1}>Noņemt</button>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="footnote">Pievienot iestādi</h3>
+        <form method="post" class="stack-form">
+          <input type="hidden" name="action" value="link-add" />
+          <InstitutionPicker value={picker.institutionInput} candidates={picker.candidates} />
+          <label>
+            <span>Mācību priekšmeti <span class="subtle">(neobligāti)</span></span>
+            <input type="text" name="subjects" value={linkSubjects} maxlength="200" />
+          </label>
+          <div><button type="submit">Pievienot iestādi</button></div>
+        </form>
+      </section>
+    </div>
+
+    <aside class="stack">
+      <section class="card">
+        <dl class="details">
+          <dt>Statuss</dt><dd><span class:list={['badge', `status-${teacher.status}`]}>{STATUS_LABELS[teacher.status]}</span></dd>
+          <dt>Vērtējums</dt><dd>{teacher.avg_score != null ? formatScore(teacher.avg_score) : '—'}</dd>
+          <dt>Atsauksmes</dt><dd>{teacher.review_count} apstiprinātas{teacher.pending_reviews > 0 && `, ${teacher.pending_reviews} gaida`}</dd>
+          <dt>Avots</dt><dd>{SOURCE_LABELS[teacher.source] ?? teacher.source}</dd>
+          <dt>Pievienots</dt><dd>{formatDate(teacher.created_at)}</dd>
+          <dt>Adrese</dt>
+          <dd>
+            {teacher.status === 'active'
+              ? <a href={`/pedagogi/${teacher.slug}`} target="_blank" rel="noopener">/pedagogi/{teacher.slug}</a>
+              : <span class="muted">/pedagogi/{teacher.slug} (nav publiska)</span>}
+          </dd>
+        </dl>
+        <p class="subtle small footnote">Adrese nemainās, ja maina vārdu, lai saites nesaplīstu.</p>
+      </section>
+
+      {sameName.length > 0 && (
+        <section class="card">
+          <h3>Pedagogi ar tādu pašu vārdu</h3>
+          <p class="subtle small">Ja tā ir viena persona, ierakstus var apvienot zemāk.</p>
+          <ul class="plain-list">
+            {sameName.map((s) => (
+              <li>
+                <a href={`/admin/pedagogi/${s.id}`}>{s.full_name}</a> <span class="badge">{STATUS_LABELS[s.status]}</span>
+                <div class="muted small">{s.institutions ?? '—'}</div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {teacher.status !== 'removed' && (
+        <section class="card">
+          <h3>Apvienot ar citu ierakstu</h3>
+          <p class="subtle small">
+            Ja šis un cits ieraksts ir viena persona: visas šī ieraksta atsauksmes un iestādes tiks pārceltas uz izvēlēto
+            pedagogu, šis ieraksts tiks dzēsts, un tā adrese pāradresēs uz izvēlēto pedagogu.
+          </p>
+          <form method="post" class="stack-form">
+            <input type="hidden" name="action" value="merge" />
+            {sameName.filter((s) => s.status !== 'removed' && s.status !== 'pending').length > 0 && (
+              <label>
+                Pārcelt uz
+                <select name="target_id">
+                  <option value="">Izvēlieties…</option>
+                  {sameName
+                    .filter((s) => s.status !== 'removed' && s.status !== 'pending')
+                    .map((s) => <option value={s.id}>{s.full_name} (ID {s.id}){s.institutions ? ` · ${s.institutions}` : ''}</option>)}
+                </select>
+              </label>
+            )}
+            <label>
+              …vai pedagoga ID
+              <input type="number" name="target_id_manual" min="1" inputmode="numeric" />
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" name="confirm" required />
+              <span>Saprotu, ka šo darbību nevar atsaukt.</span>
+            </label>
+            <div><button type="submit" class="secondary">Apvienot</button></div>
+          </form>
+        </section>
+      )}
+    </aside>
+  </div>
+</Admin>

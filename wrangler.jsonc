@@ -1,0 +1,63 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Top level = local development. Deploy with --env staging / --env production.
+  "name": "pedagogu-vertejumi-dev",
+  "main": "./dist/_worker.js/index.js",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "binding": "ASSETS", "directory": "./dist" },
+  "observability": { "enabled": true },
+  // Daily data-retention job (src/lib/retention.ts), 03:17 UTC.
+  "triggers": { "crons": ["17 3 * * *"] },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pedagogu-vertejumi-local",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    // Empty locally: the admin area uses DEV_ADMIN_EMAIL from .dev.vars instead.
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    // Turnstile TEST site key (always passes). Secret: TURNSTILE_SECRET_KEY in .dev.vars.
+    "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+  },
+  "env": {
+    "staging": {
+      "name": "pedagogu-vertejumi-staging",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "pedagogu-vertejumi-staging",
+          "database_id": "REPLACE_WITH_STAGING_DATABASE_ID",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "vars": {
+        "ACCESS_TEAM_DOMAIN": "REPLACE_WITH_TEAM.cloudflareaccess.com",
+        "ACCESS_AUD": "REPLACE_WITH_STAGING_ACCESS_AUD",
+        // Secret: npx wrangler secret put TURNSTILE_SECRET_KEY --env staging
+        "TURNSTILE_SITE_KEY": "REPLACE_WITH_STAGING_TURNSTILE_SITE_KEY"
+      }
+    },
+    "production": {
+      "name": "pedagogu-vertejumi",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "pedagogu-vertejumi-production",
+          "database_id": "REPLACE_WITH_PRODUCTION_DATABASE_ID",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "vars": {
+        "ACCESS_TEAM_DOMAIN": "REPLACE_WITH_TEAM.cloudflareaccess.com",
+        "ACCESS_AUD": "REPLACE_WITH_PRODUCTION_ACCESS_AUD",
+        // Secret: npx wrangler secret put TURNSTILE_SECRET_KEY --env production
+        "TURNSTILE_SITE_KEY": "REPLACE_WITH_PRODUCTION_TURNSTILE_SITE_KEY"
+      }
+    }
+  }
+}

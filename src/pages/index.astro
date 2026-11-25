@@ -1,0 +1,131 @@
+---
+import Base from '../layouts/Base.astro';
+import Score from '../components/Score.astro';
+import { formatInt, plural } from '../lib/format';
+import { veidsInfo, veidsOrder } from '../lib/veidi';
+
+const db = Astro.locals.runtime.env.DB;
+
+const [typeCounts, totals, recent] = await db.batch([
+  db.prepare(`SELECT veids, COUNT(*) AS count FROM institutions WHERE hidden = 0 GROUP BY veids`),
+  db.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM institutions WHERE hidden = 0)        AS institutions,
+       (SELECT COUNT(*) FROM teachers WHERE status = 'active')     AS teachers,
+       (SELECT COUNT(*) FROM reviews r JOIN teachers t ON t.id = r.teacher_id
+         WHERE r.status = 'approved' AND t.status = 'active')      AS reviews`,
+  ),
+  db.prepare(
+    `SELECT r.id, r.overall_score, r.comment, t.full_name, t.slug AS teacher_slug,
+            i.name AS institution_name, i.slug AS institution_slug
+       FROM reviews r
+       JOIN teachers t     ON t.id = r.teacher_id AND t.status = 'active'
+       JOIN institutions i ON i.id = r.institution_id AND i.hidden = 0
+      WHERE r.status = 'approved'
+      ORDER BY r.moderated_at DESC, r.id DESC
+      LIMIT 6`,
+  ),
+]);
+
+const types = (typeCounts.results as { veids: string; count: number }[])
+  .map((r) => ({ info: veidsInfo(r.veids), count: r.count }))
+  .sort((a, b) => veidsOrder(a.info) - veidsOrder(b.info));
+const t = totals.results[0] as { institutions: number; teachers: number; reviews: number };
+const recentReviews = recent.results as {
+  id: number;
+  overall_score: number;
+  comment: string;
+  full_name: string;
+  teacher_slug: string;
+  institution_name: string;
+  institution_slug: string;
+}[];
+
+function excerpt(text: string, max = 180) {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length <= max ? clean : clean.slice(0, clean.lastIndexOf(' ', max)) + '…';
+}
+---
+
+<Base
+  title="Pedagogu vērtējumi"
+  hideHeaderSearch
+  jsonLd={{
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: 'Pedagogu vērtējumi',
+    url: Astro.url.origin + '/',
+    inLanguage: 'lv',
+    potentialAction: {
+      '@type': 'SearchAction',
+      target: { '@type': 'EntryPoint', urlTemplate: `${Astro.url.origin}/meklet?q={search_term_string}` },
+      'query-input': 'required name=search_term_string',
+    },
+  }}
+>
+  <section class="hero">
+    <h1>Novērtē savus skolotājus un pasniedzējus</h1>
+    <p class="lead">
+      Dalies pieredzē par mācību kvalitāti un palīdzi citiem izvēlēties. Atsauksmes ir anonīmas, bez reģistrācijas,
+      un tās pārbauda moderators.
+    </p>
+    <form class="search-box" action="/meklet" method="get" role="search">
+      <label class="visually-hidden" for="home-q">Meklēt iestādi vai pedagogu</label>
+      <input id="home-q" type="search" name="q" placeholder="Skolas, augstskolas vai pedagoga vārds…" maxlength="100" required />
+      <button type="submit">Meklēt</button>
+    </form>
+    <p class="hero-alt">vai <a href="/vertet">uzraksti atsauksmi</a> uzreiz</p>
+    <div class="hero-stats">
+      <span><strong>{formatInt(t.institutions)}</strong> iestādes</span>
+      <span><strong>{formatInt(t.teachers)}</strong> pedagogi</span>
+      <span><strong>{formatInt(t.reviews)}</strong> atsauksmes</span>
+    </div>
+  </section>
+
+  <h2>Pārlūkot pēc iestādes veida</h2>
+  <div class="grid">
+    {types.map(({ info, count }) => (
+      <a class="card type-card" href={`/iestades?veids=${info.slug}`}>
+        <span class="count">{plural(count, 'iestāde', 'iestādes')}</span>
+        <h3>{info.label}</h3>
+        {info.examples && <p>{info.examples}</p>}
+      </a>
+    ))}
+  </div>
+
+  {recentReviews.length > 0 && (
+    <>
+      <h2>Jaunākās atsauksmes</h2>
+      <div class="grid">
+        {recentReviews.map((r) => (
+          <article class="card review-card">
+            <div class="head">
+              <Score score={r.overall_score} />
+              <div>
+                <a class="who" href={`/pedagogi/${r.teacher_slug}`}>{r.full_name}</a>
+                <div class="where">{r.institution_name}</div>
+              </div>
+            </div>
+            <blockquote>{excerpt(r.comment)}</blockquote>
+          </article>
+        ))}
+      </div>
+    </>
+  )}
+
+  <h2>Kā tas darbojas</h2>
+  <div class="steps">
+    <div class="card">
+      <h3>Atrodi iestādi un pedagogu</h3>
+      <p>Meklē pēc nosaukuma vai pārlūko pēc iestādes veida. Ja pedagoga nav sarakstā, vari viņu ieteikt.</p>
+    </div>
+    <div class="card">
+      <h3>Novērtē anonīmi</h3>
+      <p>Novērtē pēc vairākiem kritērijiem un uzraksti, kas izdevās un kas ne. Reģistrācija nav vajadzīga.</p>
+    </div>
+    <div class="card">
+      <h3>Moderators pārbauda</h3>
+      <p>Katru atsauksmi pirms publicēšanas pārbauda moderators, lai vietnē nenonāktu aizskaroši vai viltoti ieraksti.</p>
+    </div>
+  </div>
+</Base>

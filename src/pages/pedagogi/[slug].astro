@@ -1,0 +1,220 @@
+---
+import Base from '../../layouts/Base.astro';
+import Breadcrumbs from '../../components/Breadcrumbs.astro';
+import Pagination from '../../components/Pagination.astro';
+import ReviewCard from '../../components/ReviewCard.astro';
+import Score from '../../components/Score.astro';
+import { formatScore, plural, scoreLevel } from '../../lib/format';
+import { getActiveTeacherBySlug, getTeacherSummary, listTeacherReviews } from '../../lib/teachers';
+
+const db = Astro.locals.runtime.env.DB;
+const teacher = await getActiveTeacherBySlug(db, Astro.params.slug ?? '');
+if (!teacher) {
+  // Address of a teacher that was merged into another one → permanent redirect.
+  const merged = await db
+    .prepare(
+      `SELECT t.slug FROM teacher_slug_redirects r JOIN teachers t ON t.id = r.teacher_id AND t.status = 'active' WHERE r.slug = ?1`,
+    )
+    .bind(Astro.params.slug ?? '')
+    .first<{ slug: string }>();
+  if (merged) return Astro.redirect(`/pedagogi/${merged.slug}${Astro.url.search}`, 301);
+  return Astro.rewrite('/404');
+}
+
+const summary = await getTeacherSummary(db, teacher.id);
+
+// Review filters (?iestade=<slug>&periods=<period>&lapa=<n>); unknown values are ignored.
+const sp = Astro.url.searchParams;
+const filterInstitution = summary.institutions.find((i) => i.slug === sp.get('iestade') && i.review_count > 0) ?? null;
+const filterPeriod = summary.periods.includes(sp.get('periods') ?? '') ? sp.get('periods') : null;
+const pageNum = Number.parseInt(sp.get('lapa') ?? '1', 10);
+const page = Number.isFinite(pageNum) && pageNum > 0 ? Math.min(pageNum, 1000) : 1;
+
+const { reviews, total, totalPages } = await listTeacherReviews(db, teacher.id, {
+  institutionId: filterInstitution?.id ?? null,
+  period: filterPeriod,
+  page,
+});
+
+const reviewedInstitutions = summary.institutions.filter((i) => i.review_count > 0);
+const showFilters = reviewedInstitutions.length > 1 || summary.periods.length > 1;
+const isFiltered = Boolean(filterInstitution || filterPeriod || page > 1);
+const primary = summary.institutions[0];
+
+const description =
+  teacher.avg_score != null
+    ? `${teacher.full_name}${primary ? ` (${primary.name})` : ''}: vērtējums ${formatScore(teacher.avg_score)} no 5, ${plural(teacher.review_count, 'atsauksme', 'atsauksmes')}. Anonīmas skolēnu un studentu atsauksmes.`
+    : `${teacher.full_name}${primary ? ` (${primary.name})` : ''}: anonīmas skolēnu un studentu atsauksmes.`;
+
+// schema.org Person has no aggregateRating property, so the rating isn't included here.
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Person',
+  name: teacher.full_name,
+  url: new URL(`/pedagogi/${teacher.slug}`, Astro.url.origin).href,
+  jobTitle: 'Pedagogs',
+  worksFor: summary.institutions.map((i) => ({
+    '@type': 'EducationalOrganization',
+    name: i.name,
+    url: new URL(`/iestades/${i.slug}`, Astro.url.origin).href,
+  })),
+};
+---
+
+<Base title={teacher.full_name} description={description} noindex={isFiltered} canonicalPath={`/pedagogi/${teacher.slug}`} jsonLd={jsonLd}>
+  <Breadcrumbs
+    items={[
+      { label: 'Sākums', href: '/' },
+      ...(primary
+        ? [{ label: 'Iestādes', href: '/iestades' }, { label: primary.name, href: `/iestades/${primary.slug}` }]
+        : []),
+      { label: teacher.full_name },
+    ]}
+  />
+
+  <div class="page-head">
+    <div>
+      <div class="badges">
+        {summary.institutions.map((i) => <a class="badge accent" href={`/iestades/${i.slug}`}>{i.name}</a>)}
+      </div>
+      <h1>{teacher.full_name}</h1>
+      <a class="button head-action" href={`/pedagogi/${teacher.slug}/vertet`}>Novērtēt pedagogu</a>
+    </div>
+    <div class="card score-panel">
+      <Score score={teacher.avg_score} size="lg" />
+      <div class="facts">
+        {teacher.avg_score != null ? (
+          <>
+            <strong>Kopējais vērtējums</strong><br />
+            {plural(teacher.review_count, 'atsauksme', 'atsauksmes')}
+          </>
+        ) : (
+          <>
+            <strong>Vēl nav vērtējumu</strong><br />
+            Esi pirmais, kas novērtē šo pedagogu.
+          </>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <div class="two-col">
+    <section aria-labelledby="atsauksmes">
+      <h2 id="atsauksmes">Atsauksmes</h2>
+
+      {showFilters && (
+        <form class="card filters compact" method="get" action={`/pedagogi/${teacher.slug}#atsauksmes`}>
+          {reviewedInstitutions.length > 1 && (
+            <label>
+              Iestāde
+              <select name="iestade">
+                <option value="">Visas iestādes</option>
+                {reviewedInstitutions.map((i) => (
+                  <option value={i.slug} selected={filterInstitution?.id === i.id}>{i.name} ({i.review_count})</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {summary.periods.length > 1 && (
+            <label>
+              Mācību gads
+              <select name="periods">
+                <option value="">Visi</option>
+                {summary.periods.map((p) => <option value={p} selected={filterPeriod === p}>{p}</option>)}
+              </select>
+            </label>
+          )}
+          <div class="actions">
+            <button type="submit">Atlasīt</button>
+            {(filterInstitution || filterPeriod) && (
+              <a class="button ghost" href={`/pedagogi/${teacher.slug}#atsauksmes`}>Notīrīt</a>
+            )}
+          </div>
+        </form>
+      )}
+
+      {reviews.length > 0 ? (
+        <>
+          {(filterInstitution || filterPeriod) && (
+            <p class="muted small">Atlasē: {plural(total, 'atsauksme', 'atsauksmes')}.</p>
+          )}
+          <div class="review-list">
+            {reviews.map((r) => <ReviewCard review={r} showInstitution={!filterInstitution} />)}
+          </div>
+          <Pagination page={page} totalPages={totalPages} url={Astro.url} />
+        </>
+      ) : (
+        <div class="empty">
+          {teacher.review_count > 0 ? (
+            <p><strong>Neviena atsauksme neatbilst izvēlētajiem filtriem.</strong></p>
+          ) : (
+            <>
+              <p><strong>Par šo pedagogu vēl nav atsauksmju.</strong></p>
+              <p><a class="button" href={`/pedagogi/${teacher.slug}/vertet`}>Uzrakstīt pirmo atsauksmi</a></p>
+            </>
+          )}
+        </div>
+      )}
+    </section>
+
+    <aside class="stack">
+      {teacher.review_count > 0 && (
+        <section class="card" aria-labelledby="kriteriji">
+          <h3 id="kriteriji">Vērtējums pa kritērijiem</h3>
+          <ul class="bars">
+            {summary.criteria.map((c) => (
+              <li title={c.description ?? undefined}>
+                <div class="bar-label">
+                  <span>{c.label}</span>
+                  <strong>{c.avg_score != null ? formatScore(c.avg_score) : '—'}</strong>
+                </div>
+                <svg class="bar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true">
+                  <rect class="bar-track" width="100" height="8" rx="4" />
+                  {c.avg_score != null && (
+                    <rect class:list={['bar-fill', scoreLevel(c.avg_score)]} width={(c.avg_score / 5) * 100} height="8" rx="4" />
+                  )}
+                </svg>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {summary.tags.length > 0 && (
+        <section class="card" aria-labelledby="birkas">
+          <h3 id="birkas">Biežāk minētais</h3>
+          <ul class="tag-counts">
+            {summary.tags.map((t) => (
+              <li class:list={['badge', 'tag', t.sentiment]}>
+                {t.label} <span class="tag-count">{t.count}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {summary.institutions.length > 0 && (
+        <section class="card" aria-labelledby="iestades">
+          <h3 id="iestades">Iestādes</h3>
+          <ul class="plain-list">
+            {summary.institutions.map((i) => (
+              <li>
+                <a href={`/iestades/${i.slug}`}>{i.name}</a>
+                <div class="muted small">
+                  {[i.subjects, i.review_count > 0 ? `${formatScore(i.avg_score ?? 0)} · ${plural(i.review_count, 'atsauksme', 'atsauksmes')}` : 'Nav atsauksmju']
+                    .filter(Boolean)
+                    .join(' · ')}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <p class="subtle small">
+        Vai esat šis pedagogs un vēlaties, lai lapa tiek dzēsta vai pārskatīta?
+        <a href={`/dzesanas-pieprasijums?pedagogs=${teacher.slug}`} rel="nofollow">Iesniegt pieprasījumu</a>
+      </p>
+    </aside>
+  </div>
+</Base>

@@ -1,0 +1,117 @@
+---
+// The shared part of both review forms (existing teacher / suggested teacher).
+// Works without JavaScript except for the Turnstile widget, which needs it.
+import { COMMENT_MAX, COMMENT_MIN, MAX_TAGS, SUBJECT_MAX, type ReviewErrors, type ReviewFormOptions, type ReviewValues } from '../lib/reviews';
+
+interface Props {
+  options: ReviewFormOptions;
+  values: ReviewValues;
+  errors: ReviewErrors;
+  turnstileSiteKey: string;
+}
+
+const { options, values, errors, turnstileSiteKey } = Astro.props;
+const missing = new Set(errors.missingCriteria ?? []);
+---
+
+<section class="form-section" aria-labelledby="sec-scores">
+  <h2 id="sec-scores">Vērtējums</h2>
+  <p class="muted small">1 – ļoti slikti, 3 – vidēji, 5 – izcili.</p>
+  {errors.scores && <p class="field-error" id="err-scores">{errors.scores}</p>}
+  <div class="criteria">
+    {options.criteria.map((c) => (
+      <fieldset class:list={['criterion', missing.has(c.id) && 'invalid']}>
+        <legend>
+          <strong>{c.label}</strong>
+          {c.description && <span class="muted small">{c.description}</span>}
+        </legend>
+        <div class="rating">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <label>
+              <input type="radio" name={`score_${c.id}`} value={n} required checked={values.scores[c.id] === n} />
+              <span>{n}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    ))}
+  </div>
+</section>
+
+{options.tags.length > 0 && (
+  <section class="form-section" aria-labelledby="sec-tags">
+    <h2 id="sec-tags">Birkas <span class="muted small">(neobligāti, līdz {MAX_TAGS})</span></h2>
+    {errors.tags && <p class="field-error">{errors.tags}</p>}
+    <div class="chips">
+      {options.tags.map((t) => (
+        <label class:list={['chip', t.sentiment]}>
+          <input type="checkbox" name="tags" value={t.id} checked={values.tagIds.includes(t.id)} />
+          <span>{t.label}</span>
+        </label>
+      ))}
+    </div>
+  </section>
+)}
+
+<section class="form-section" aria-labelledby="sec-context">
+  <h2 id="sec-context">Par ko ir atsauksme</h2>
+  <div class="form-grid">
+    <label>
+      <span>Mācību priekšmets vai kurss <span class="subtle">(neobligāti)</span></span>
+      <input type="text" name="subject" value={values.subject} maxlength={SUBJECT_MAX} placeholder="Piemēram, Matemātika" aria-invalid={errors.subject ? 'true' : undefined} />
+      {errors.subject && <span class="field-error">{errors.subject}</span>}
+    </label>
+    <label>
+      <span>Mācību gads <span class="subtle">(neobligāti)</span></span>
+      <select name="period">
+        <option value="">Nenorādīt</option>
+        {options.periods.map((p) => <option value={p} selected={values.period === p}>{p}</option>)}
+      </select>
+      {errors.period && <span class="field-error">{errors.period}</span>}
+    </label>
+  </div>
+</section>
+
+<section class="form-section" aria-labelledby="sec-comment">
+  <h2 id="sec-comment"><label for="comment">Atsauksme</label></h2>
+  <p class="muted small" id="comment-hint">
+    Apraksti savu pieredzi: kas palīdzēja mācīties un kas varētu būt labāk. Neraksti savu vai citu skolēnu vārdus,
+    kontaktinformāciju, aizskarošus izteicienus vai apgalvojumus par pedagoga privāto dzīvi. Atsauksmi pirms
+    publicēšanas pārbaudīs moderators.
+  </p>
+  <textarea
+    id="comment"
+    name="comment"
+    rows="8"
+    minlength={COMMENT_MIN}
+    maxlength={COMMENT_MAX}
+    required
+    aria-describedby="comment-hint"
+    aria-invalid={errors.comment ? 'true' : undefined}
+  >{values.comment}</textarea>
+  <p class="subtle small">No {COMMENT_MIN} līdz {COMMENT_MAX} rakstzīmēm.</p>
+  {errors.comment && <p class="field-error">{errors.comment}</p>}
+</section>
+
+<section class="form-section">
+  <label class="checkbox">
+    <input type="checkbox" name="rules" required checked={values.acceptedRules} />
+    <span>
+      Piekrītu <a href="/noteikumi" target="_blank" rel="noopener">atsauksmju noteikumiem</a> un apliecinu, ka
+      atsauksme ir patiesa un balstīta uz manu pieredzi.
+    </span>
+  </label>
+  {errors.rules && <p class="field-error">{errors.rules}</p>}
+</section>
+
+<section class="form-section">
+  <div class="cf-turnstile" data-sitekey={turnstileSiteKey} data-language="lv" data-theme="auto"></div>
+  <noscript><p class="field-error">Lai iesniegtu atsauksmi, pārlūkā jāieslēdz JavaScript (robotu pārbaudei).</p></noscript>
+  {errors.form && <p class="field-error">{errors.form}</p>}
+  <p class="subtle small">
+    Mēs nesaglabājam tavu vārdu, e-pastu, IP adresi vai citus datus, kas ļautu tevi identificēt.
+  </p>
+  <button type="submit" class="large">Iesniegt atsauksmi</button>
+</section>
+
+<script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>

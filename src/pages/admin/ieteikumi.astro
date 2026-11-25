@@ -1,0 +1,71 @@
+---
+// Teachers suggested by students, waiting for a moderator. Each is handled on the page of
+// its oldest pending review (approve / link to an existing teacher / reject).
+import Admin from '../../layouts/Admin.astro';
+import { formatDate } from '../../lib/format';
+import { deleteEmptySuggestion } from '../../lib/moderation';
+import { positiveInt } from '../../lib/validate';
+
+const db = Astro.locals.runtime.env.DB;
+
+let error: string | null = null;
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const teacherId = positiveInt(form.get('teacher_id'));
+  const result = teacherId ? await deleteEmptySuggestion(db, teacherId) : { ok: false as const, error: 'Nederīgs pieprasījums.' };
+  if (result.ok) return Astro.redirect('/admin/ieteikumi?msg=suggestion-rejected', 303);
+  error = result.error;
+}
+const { results } = await db
+  .prepare(
+    `SELECT t.id, t.full_name, t.created_at,
+            (SELECT GROUP_CONCAT(i.name, ' · ') FROM teacher_institutions ti
+               JOIN institutions i ON i.id = ti.institution_id WHERE ti.teacher_id = t.id) AS institutions,
+            (SELECT COUNT(*) FROM reviews r WHERE r.teacher_id = t.id AND r.status = 'pending') AS pending_reviews,
+            (SELECT r.id FROM reviews r WHERE r.teacher_id = t.id AND r.status = 'pending'
+              ORDER BY r.created_at, r.id LIMIT 1) AS first_review_id
+       FROM teachers t
+      WHERE t.status = 'pending'
+      ORDER BY t.created_at, t.id`,
+  )
+  .all<{ id: number; full_name: string; created_at: string; institutions: string | null; pending_reviews: number; first_review_id: number | null }>();
+const message = Astro.url.searchParams.get('msg') === 'suggestion-rejected' ? 'Ieteikums dzēsts.' : null;
+---
+
+<Admin title="Pedagogu ieteikumi">
+  {message && <div class="notice ok">{message}</div>}
+  {error && <div class="notice err">{error}</div>}
+  <p class="muted">
+    Skolēnu ieteiktie pedagogi parādās vietnē tikai pēc apstiprināšanas. Atveriet atsauksmi, lai apstiprinātu pedagogu,
+    piesaistītu to esošam ierakstam vai noraidītu.
+  </p>
+  {results.length > 0 ? (
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Ieteiktais vārds</th><th>Iestāde</th><th>Atsauksmes</th><th>Ieteikts</th><th></th></tr></thead>
+        <tbody>
+          {results.map((t) => (
+            <tr>
+              <td><strong>{t.full_name}</strong></td>
+              <td class="small">{t.institutions ?? '—'}</td>
+              <td class="small">{t.pending_reviews}</td>
+              <td class="small muted nowrap">{formatDate(t.created_at)}</td>
+              <td>
+                {t.first_review_id ? (
+                  <a class="button secondary" href={`/admin/atsauksmes/${t.first_review_id}`}>Pārskatīt</a>
+                ) : (
+                  <form method="post" class="inline">
+                    <input type="hidden" name="teacher_id" value={t.id} />
+                    <button type="submit" class="secondary" title="Ieteikumam nav atsauksmju">Dzēst</button>
+                  </form>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  ) : (
+    <div class="empty"><p>Nav jaunu ieteikumu.</p></div>
+  )}
+</Admin>

@@ -1,0 +1,53 @@
+---
+import '../styles/global.css';
+import { ROLE_LABELS } from '../lib/auth';
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+const admin = Astro.locals.admin!;
+const path = Astro.url.pathname.replace(/\/$/, '') || '/';
+
+const links = [
+  { href: '/admin', label: 'Panelis', adminOnly: false },
+  { href: '/admin/atsauksmes', label: 'Atsauksmes', adminOnly: false },
+  { href: '/admin/ieteikumi', label: 'Ieteikumi', adminOnly: false },
+  { href: '/admin/atbildes', label: 'Atbildes', adminOnly: false },
+  { href: '/admin/pieprasijumi', label: 'Pieprasījumi', adminOnly: true },
+  { href: '/admin/pedagogi', label: 'Pedagogi', adminOnly: true },
+  { href: '/admin/kriteriji', label: 'Kritēriji', adminOnly: true },
+  { href: '/admin/lietotaji', label: 'CMS lietotāji', adminOnly: true },
+  { href: '/admin/palidziba', label: 'Palīdzība', adminOnly: false },
+].filter((l) => !l.adminOnly || admin.role === 'admin');
+
+const isCurrent = (href: string) => (href === '/admin' ? path === href : path === href || path.startsWith(href + '/'));
+---
+
+<!doctype html>
+<html lang="lv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>{title} | CMS</title>
+  </head>
+  <body>
+    <header class="admin">
+      <div class="container">
+        <a class="brand" href="/admin">CMS</a>
+        <nav>
+          {links.map((l) => (
+            <a href={l.href} aria-current={isCurrent(l.href) ? 'page' : undefined}>{l.label}</a>
+          ))}
+        </nav>
+        <span class="who">{admin.email} · {ROLE_LABELS[admin.role]}</span>
+      </div>
+    </header>
+    <main class="container">
+      <h1>{title}</h1>
+      <slot />
+    </main>
+  </body>
+</html>

@@ -1,0 +1,126 @@
+---
+import Admin from '../../layouts/Admin.astro';
+import { adminOnly } from '../../lib/auth';
+import { deleteUnused, listTaxonomy, saveCriterion, saveTag, SENTIMENT_LABELS, type Sentiment } from '../../lib/taxonomy';
+import { positiveInt } from '../../lib/validate';
+
+const denied = adminOnly(Astro.locals);
+if (denied) return denied;
+
+const db = Astro.locals.runtime.env.DB;
+
+let error: string | null = null;
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  const id = positiveInt(form.get('id'));
+  const result =
+    action === 'save-criterion' ? await saveCriterion(db, form)
+    : action === 'save-tag' ? await saveTag(db, form)
+    : action === 'delete-criterion' && id ? await deleteUnused(db, 'criterion', id)
+    : action === 'delete-tag' && id ? await deleteUnused(db, 'tag', id)
+    : { ok: false as const, error: 'Nezināma darbība.' };
+  if (result.ok) return Astro.redirect('/admin/kriteriji?msg=saved', 303);
+  error = result.error;
+}
+
+const { criteria, tags } = await listTaxonomy(db);
+const message = Astro.url.searchParams.get('msg') === 'saved' ? 'Saglabāts.' : null;
+---
+
+<Admin title="Kritēriji un birkas">
+  {message && <div class="notice ok">{message}</div>}
+  {error && <div class="notice err" role="alert">{error}</div>}
+
+  <p class="muted">
+    Izmaiņas attiecas uz jaunām atsauksmēm. Kritēriju vai birku, kas jau izmantota atsauksmēs, var tikai deaktivizēt;
+    vecās atsauksmes saglabā savus vērtējumus. Kārtošanas skaitlis nosaka secību formā (mazākais pirmais).
+  </p>
+
+  <h2>Vērtēšanas kritēriji</h2>
+  <div class="table-wrap">
+    <table class="edit-table">
+      <thead><tr><th>Nosaukums</th><th>Apraksts</th><th>Secība</th><th>Aktīvs</th><th>Lietots</th><th></th></tr></thead>
+      <tbody>
+        {criteria.map((c) => (
+          <tr class:list={[!c.active && 'inactive']}>
+            <td><input form={`c${c.id}`} type="text" name="label" value={c.label} required maxlength="40" aria-label="Nosaukums" /></td>
+            <td><input form={`c${c.id}`} type="text" name="description" value={c.description ?? ''} maxlength="120" aria-label="Apraksts" /></td>
+            <td><input form={`c${c.id}`} type="number" name="sort_order" value={c.sort_order} min="0" max="999" class="num" aria-label="Secība" /></td>
+            <td><input form={`c${c.id}`} type="checkbox" name="active" checked={c.active === 1} aria-label="Aktīvs" /></td>
+            <td class="small muted">{c.used}</td>
+            <td class="nowrap">
+              <form id={`c${c.id}`} method="post" class="inline">
+                <input type="hidden" name="action" value="save-criterion" />
+                <input type="hidden" name="id" value={c.id} />
+                <button type="submit" class="secondary">Saglabāt</button>
+              </form>
+              {c.used === 0 && (
+                <form method="post" class="inline">
+                  <input type="hidden" name="action" value="delete-criterion" />
+                  <input type="hidden" name="id" value={c.id} />
+                  <button type="submit" class="secondary">Dzēst</button>
+                </form>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+  <form method="post" class="form-row card footnote">
+    <input type="hidden" name="action" value="save-criterion" />
+    <label>Jauns kritērijs <input type="text" name="label" required maxlength="40" /></label>
+    <label class="grow">Apraksts <input type="text" name="description" maxlength="120" /></label>
+    <label>Secība <input type="number" name="sort_order" value={criteria.length + 1} min="0" max="999" class="num" /></label>
+    <button type="submit">Pievienot</button>
+  </form>
+
+  <h2>Birkas</h2>
+  <div class="table-wrap">
+    <table class="edit-table">
+      <thead><tr><th>Nosaukums</th><th>Noskaņa</th><th>Secība</th><th>Aktīva</th><th>Lietota</th><th></th></tr></thead>
+      <tbody>
+        {tags.map((t) => (
+          <tr class:list={[!t.active && 'inactive']}>
+            <td><input form={`t${t.id}`} type="text" name="label" value={t.label} required maxlength="40" aria-label="Nosaukums" /></td>
+            <td>
+              <select form={`t${t.id}`} name="sentiment" aria-label="Noskaņa">
+                {(Object.keys(SENTIMENT_LABELS) as Sentiment[]).map((s) => <option value={s} selected={t.sentiment === s}>{SENTIMENT_LABELS[s]}</option>)}
+              </select>
+            </td>
+            <td><input form={`t${t.id}`} type="number" name="sort_order" value={t.sort_order} min="0" max="999" class="num" aria-label="Secība" /></td>
+            <td><input form={`t${t.id}`} type="checkbox" name="active" checked={t.active === 1} aria-label="Aktīva" /></td>
+            <td class="small muted">{t.used}</td>
+            <td class="nowrap">
+              <form id={`t${t.id}`} method="post" class="inline">
+                <input type="hidden" name="action" value="save-tag" />
+                <input type="hidden" name="id" value={t.id} />
+                <button type="submit" class="secondary">Saglabāt</button>
+              </form>
+              {t.used === 0 && (
+                <form method="post" class="inline">
+                  <input type="hidden" name="action" value="delete-tag" />
+                  <input type="hidden" name="id" value={t.id} />
+                  <button type="submit" class="secondary">Dzēst</button>
+                </form>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+  <form method="post" class="form-row card footnote">
+    <input type="hidden" name="action" value="save-tag" />
+    <label class="grow">Jauna birka <input type="text" name="label" required maxlength="40" /></label>
+    <label>
+      Noskaņa
+      <select name="sentiment">
+        {(Object.keys(SENTIMENT_LABELS) as Sentiment[]).map((s) => <option value={s}>{SENTIMENT_LABELS[s]}</option>)}
+      </select>
+    </label>
+    <label>Secība <input type="number" name="sort_order" value={tags.length + 1} min="0" max="999" class="num" /></label>
+    <button type="submit">Pievienot</button>
+  </form>
+</Admin>

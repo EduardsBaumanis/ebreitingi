@@ -1,0 +1,114 @@
+---
+// Privacy policy (plan.md §9). Retention periods come from src/lib/retention.ts so the text and
+// the daily deletion job can't drift apart. Needs legal review before launch (plan week 8).
+import Base from '../layouts/Base.astro';
+import Breadcrumbs from '../components/Breadcrumbs.astro';
+import { RETENTION } from '../lib/retention';
+import { isPlaceholder, SITE } from '../lib/site';
+
+const c = SITE.controller;
+const updated = new Intl.DateTimeFormat('lv-LV', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(SITE.privacyPolicyUpdated));
+const hasPlaceholders = Object.values(c).some(isPlaceholder);
+---
+
+<Base title="Privātuma politika" description={`Kā vietne ${SITE.name} apstrādā personas datus: skolēnu atsauksmes, pedagogu dati, atbildes un dzēšanas pieprasījumi.`}>
+  <Breadcrumbs items={[{ label: 'Sākums', href: '/' }, { label: 'Privātuma politika' }]} />
+  <article class="prose">
+    <h1>Privātuma politika</h1>
+    <p class="muted">Spēkā no {updated}.</p>
+    {hasPlaceholders && import.meta.env.DEV && (
+      <p class="notice err">Izstrādes piezīme: src/lib/site.ts vēl jāaizpilda pārziņa dati.</p>
+    )}
+
+    <h2>1. Kas atbild par datiem</h2>
+    <p>
+      Personas datu pārzinis ir <strong>{c.name}</strong> (reģ. nr. {c.registrationNumber}, {c.address}).
+      Jautājumos par datu apstrādi rakstiet uz <a href={isPlaceholder(c.email) ? undefined : `mailto:${c.email}`}>{c.email}</a>
+      vai izmantojiet <a href="/dzesanas-pieprasijums">pieprasījuma formu</a>.
+    </p>
+
+    <h2>2. Skolēni un studenti, kas raksta atsauksmes</h2>
+    <p>
+      Atsauksmes ir anonīmas, un reģistrācija nav vajadzīga. Mēs <strong>nesaglabājam</strong> jūsu vārdu, e-pastu,
+      IP adresi, pārlūka datus vai sīkdatnes. Saglabājam tikai pašu atsauksmi (vērtējumus, birkas, priekšmetu, mācību
+      gadu un tekstu) un tās iesniegšanas laiku; publiski rādām tikai mēnesi un gadu.
+    </p>
+    <p>
+      Lai atturētu robotus, formās izmantojam Cloudflare Turnstile. Pārbaudes laikā Cloudflare apstrādā tehniskus datus
+      par jūsu pārlūku un savienojumu; mēs šos datus nesaņemam un nesaglabājam. Lūdzu, nerakstiet atsauksmē informāciju,
+      pēc kuras jūs varētu atpazīt.
+    </p>
+
+    <h2>3. Pedagogi</h2>
+    <p>
+      Par pedagogiem apstrādājam vārdu, uzvārdu, izglītības iestādi, mācību priekšmetus un skolēnu un studentu atsauksmes
+      par viņu darbu. Šos datus iegūstam no skolēnu ieteikumiem, publiski pieejamas informācijas un vietnes administratoriem.
+    </p>
+    <p>
+      <strong>Tiesiskais pamats:</strong> mūsu un sabiedrības leģitīmās intereses (VDAR 6. panta 1. punkta f) apakšpunkts)
+      dalīties ar informāciju un saņemt to par izglītības kvalitāti. Apstrāde attiecas tikai uz pedagoga profesionālo
+      darbību; atsauksmes par privāto dzīvi, izskatu vai veselību netiek publicētas (sk. <a href="/noteikumi">noteikumus</a>).
+      Katru atsauksmi pirms publicēšanas pārbauda moderators.
+    </p>
+    <p>
+      Pedagogs var publiski atbildēt uz atsauksmēm, iebilst pret savu datu apstrādi un pieprasīt lapas vai atsauksmes
+      labošanu vai dzēšanu, izmantojot <a href="/dzesanas-pieprasijums">pieprasījuma formu</a>. Ja pedagoga lapa tiek
+      dzēsta pēc pieprasījuma, saglabājam tikai vārdu un iestādi ar atzīmi par dzēšanu, lai lapu nevarētu izveidot
+      atkārtoti.
+    </p>
+
+    <h2>4. Pedagogu atbildes</h2>
+    <p>
+      Atbildot uz atsauksmi, pedagogs norāda e-pastu, lai moderators varētu pārliecināties, ka atbildi rakstījis pats
+      pedagogs. E-pasts netiek publicēts un tiek dzēsts, tiklīdz atbilde ir apstiprināta vai noraidīta (vēlākais pēc
+      {RETENTION.pendingReplyEmailDays} dienām).
+    </p>
+
+    <h2>5. Dzēšanas un pārskatīšanas pieprasījumi</h2>
+    <p>
+      Pieprasījuma izskatīšanai apstrādājam jūsu vārdu, e-pastu, saistību ar saturu un pieprasījuma tekstu. Tiesiskais
+      pamats: juridiska pienākuma izpilde (VDAR 6. panta 1. punkta c) apakšpunkts) un jūsu piekrišana. Atbildam ne vēlāk
+      kā 30 dienu laikā.
+    </p>
+
+    <h2>6. Cik ilgi glabājam datus</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Dati</th><th>Glabāšanas termiņš</th></tr></thead>
+        <tbody>
+          <tr><td>Publicētas atsauksmes un pedagogu lapas</td><td>Kamēr vietne darbojas vai līdz dzēšanai pēc pieprasījuma</td></tr>
+          <tr><td>Noraidītas vai no vietnes noņemtas atsauksmes</td><td>{RETENTION.rejectedReviewMonths} mēneši pēc lēmuma</td></tr>
+          <tr><td>Atsauksmes sākotnējais teksts, ja moderators to labojis</td><td>{RETENTION.originalTextDays} dienas pēc publicēšanas</td></tr>
+          <tr><td>Pedagoga e-pasts pie atbildes</td><td>Līdz lēmumam, vēlākais {RETENTION.pendingReplyEmailDays} dienas</td></tr>
+          <tr><td>Dzēšanas pieprasījumi</td><td>{RETENTION.removalRequestMonths} mēneši pēc izskatīšanas</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small muted">Dati, kuru termiņš beidzies, tiek automātiski dzēsti reizi diennaktī.</p>
+
+    <h2>7. Kas vēl apstrādā datus</h2>
+    <p>
+      Vietne darbojas Cloudflare, Inc. infrastruktūrā (mitināšana, datubāze, Turnstile robotu pārbaude un administratoru
+      piekļuves kontrole). Cloudflare apstrādā datus mūsu vārdā kā apstrādātājs. Dati var tikt apstrādāti arī ārpus Eiropas
+      Ekonomikas zonas; šādā gadījumā tos aizsargā Eiropas Komisijas standarta līguma klauzulas vai ES un ASV datu
+      privātuma regulējums. Datus netirgojam un nenododam reklāmas vajadzībām.
+    </p>
+
+    <h2>8. Sīkdatnes</h2>
+    <p>
+      Publiskajā vietnē neizmantojam analītikas, reklāmas vai izsekošanas sīkdatnes. Administratoru sadaļā Cloudflare
+      Access izmanto tehniski nepieciešamu sīkdatni pieteikšanās sesijai.
+    </p>
+
+    <h2>9. Jūsu tiesības</h2>
+    <p>
+      Jums ir tiesības piekļūt saviem datiem, tos labot, pieprasīt dzēšanu, ierobežot apstrādi un iebilst pret apstrādi,
+      kas balstīta uz leģitīmajām interesēm. Lai izmantotu šīs tiesības, aizpildiet
+      <a href="/dzesanas-pieprasijums">pieprasījuma formu</a> vai rakstiet uz {c.email}. Ja uzskatāt, ka jūsu tiesības ir
+      pārkāptas, varat iesniegt sūdzību Datu valsts inspekcijai (<a href="https://www.dvi.gov.lv" rel="noopener">www.dvi.gov.lv</a>).
+    </p>
+
+    <h2>10. Izmaiņas</h2>
+    <p>Par būtiskām izmaiņām šajā politikā paziņosim šajā lapā, norādot jauno spēkā stāšanās datumu.</p>
+  </article>
+</Base>

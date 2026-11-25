@@ -1,0 +1,11 @@
+---
+// schema.org structured data. A <script type="application/ld+json"> block is data, not code,
+// so it's allowed by the Content-Security-Policy. "<" is escaped so text can't close the tag.
+interface Props {
+  data: object | object[];
+}
+const { data } = Astro.props;
+const json = JSON.stringify(data).replace(/</g, '\\u003c');
+---
+
+<script type="application/ld+json" set:html={json} />

@@ -1,0 +1,34 @@
+---
+import Score from './Score.astro';
+import { formatLocation, plural } from '../lib/format';
+import { veidsInfo } from '../lib/veidi';
+import type { InstitutionRow } from '../lib/institutions';
+
+interface Props {
+  inst: InstitutionRow;
+  /** Link target; defaults to the institution page. */
+  href?: string;
+}
+
+const { inst, href = `/iestades/${inst.slug}` } = Astro.props;
+const location = formatLocation(inst.location);
+const veids = veidsInfo(inst.veids);
+---
+
+<li class="result">
+  <div class="body">
+    <a class="title" href={href}>{inst.name}</a>
+    <div class="meta">
+      {[inst.tips ?? veids.label, location].filter(Boolean).join(' · ')}
+    </div>
+    {(inst.liquidated === 1) && (
+      <div class="badges"><span class="badge warn">Likvidēta</span></div>
+    )}
+  </div>
+  <div class="side">
+    <Score score={inst.avg_score} />
+    <span class="count">
+      {inst.review_count > 0 ? plural(inst.review_count, 'atsauksme', 'atsauksmes') : 'Nav atsauksmju'}
+    </span>
+  </div>
+</li>

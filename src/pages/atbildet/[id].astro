@@ -1,0 +1,124 @@
+---
+// Public form: a teacher replies to a published review about them.
+import Base from '../../layouts/Base.astro';
+import Breadcrumbs from '../../components/Breadcrumbs.astro';
+import Score from '../../components/Score.astro';
+import { formatMonth } from '../../lib/format';
+import { getReplyTarget, parseReplyForm, REPLY_MAX, REPLY_MIN, submitReply, type ReplyValues } from '../../lib/replies';
+import { TURNSTILE_MESSAGES, verifyTurnstile } from '../../lib/turnstile';
+import { positiveInt } from '../../lib/validate';
+
+const env = Astro.locals.runtime.env;
+const reviewId = positiveInt(Astro.params.id);
+const target = reviewId ? await getReplyTarget(env.DB, reviewId) : null;
+if (!reviewId || !target) return Astro.rewrite('/404');
+
+let values: ReplyValues = { body: '', email: '', confirmed: false };
+let errors: Record<string, string> = {};
+const sent = Astro.url.searchParams.get('nosutits') === '1';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const parsed = parseReplyForm(form);
+  values = parsed.values;
+  errors = parsed.errors;
+  if (!Object.keys(errors).length) {
+    const turnstile = await verifyTurnstile(
+      String(form.get('cf-turnstile-response') ?? '') || null,
+      (env as { TURNSTILE_SECRET_KEY?: string }).TURNSTILE_SECRET_KEY,
+    );
+    if (!turnstile.ok) errors.form = TURNSTILE_MESSAGES[turnstile.reason];
+    else {
+      await submitReply(env.DB, reviewId, values);
+      return Astro.redirect(`/atbildet/${reviewId}?nosutits=1`, 303);
+    }
+  }
+  Astro.response.status = 422;
+}
+---
+
+<Base title="Atbildēt uz atsauksmi" noindex>
+  <Breadcrumbs
+    items={[
+      { label: 'Sākums', href: '/' },
+      { label: target.teacher_name, href: `/pedagogi/${target.teacher_slug}` },
+      { label: 'Atbildēt uz atsauksmi' },
+    ]}
+  />
+  <div class="form-page">
+    <h1>Atbildēt uz atsauksmi</h1>
+
+    {sent ? (
+      <div class="thanks">
+        <div class="thanks-icon" aria-hidden="true">✓</div>
+        <p class="lead">Paldies! Atbilde tiks publicēta pēc pārbaudes.</p>
+        <p class="muted">
+          Moderators var ar jums sazināties, lai pārliecinātos, ka atbildi rakstījāt jūs. Pēc lēmuma jūsu e-pasta adrese
+          tiks dzēsta.
+        </p>
+        <p><a class="button" href={`/pedagogi/${target.teacher_slug}#atsauksme-${target.id}`}>Atpakaļ uz atsauksmēm</a></p>
+      </div>
+    ) : (
+      <>
+        <p class="muted">
+          Ja esat <strong>{target.teacher_name}</strong>, varat publiski atbildēt uz šo atsauksmi. Atbilde parādīsies zem
+          atsauksmes pēc tam, kad moderators būs pārliecinājies, ka to rakstījāt jūs.
+        </p>
+
+        <article class="card review">
+          <header class="review-head">
+            <Score score={target.overall_score} />
+            <div class="review-context">
+              <div class="review-what">{[target.subject, target.institution_name, target.period].filter(Boolean).join(' · ')}</div>
+              <div class="subtle small">{formatMonth(target.created_at)}</div>
+            </div>
+          </header>
+          <p class="review-text">{target.comment}</p>
+        </article>
+
+        {Object.keys(errors).length > 0 && (
+          <div class="notice err footnote" role="alert">{errors.form ?? 'Lūdzu, izlabojiet atzīmētās vietas formā.'}</div>
+        )}
+
+        <form method="post" class="review-form footnote">
+          <section class="form-section">
+            <h2><label for="body">Jūsu atbilde</label></h2>
+            <p class="muted small" id="body-hint">
+              Atbildiet lietišķi un neminiet skolēnu vārdus vai citus personas datus. Atbilde būs redzama publiski.
+            </p>
+            <textarea id="body" name="body" rows="7" minlength={REPLY_MIN} maxlength={REPLY_MAX} required aria-describedby="body-hint" aria-invalid={errors.body ? 'true' : undefined}>{values.body}</textarea>
+            <p class="subtle small">No {REPLY_MIN} līdz {REPLY_MAX} rakstzīmēm.</p>
+            {errors.body && <p class="field-error">{errors.body}</p>}
+          </section>
+
+          <section class="form-section">
+            <label>
+              <span>E-pasts saziņai <span class="subtle">(netiks publicēts)</span></span>
+              <input type="email" name="email" value={values.email} required maxlength="254" autocomplete="email" aria-invalid={errors.email ? 'true' : undefined} />
+            </label>
+            <p class="subtle small">
+              Vēlams izglītības iestādes e-pasts: tā moderatoram vieglāk pārliecināties, ka esat šis pedagogs. Adrese tiks
+              izmantota tikai šai pārbaudei un dzēsta, tiklīdz atbilde būs apstiprināta vai noraidīta.
+            </p>
+            {errors.email && <p class="field-error">{errors.email}</p>}
+          </section>
+
+          <section class="form-section">
+            <label class="checkbox">
+              <input type="checkbox" name="confirm" required checked={values.confirmed} />
+              <span>Apliecinu, ka esmu {target.teacher_name} un atbildu savā vārdā.</span>
+            </label>
+            {errors.confirm && <p class="field-error">{errors.confirm}</p>}
+          </section>
+
+          <section class="form-section">
+            <div class="cf-turnstile" data-sitekey={env.TURNSTILE_SITE_KEY} data-language="lv" data-theme="auto"></div>
+            <noscript><p class="field-error">Lai nosūtītu atbildi, pārlūkā jāieslēdz JavaScript (robotu pārbaudei).</p></noscript>
+            <button type="submit" class="large">Nosūtīt atbildi</button>
+          </section>
+        </form>
+        <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+      </>
+    )}
+  </div>
+</Base>

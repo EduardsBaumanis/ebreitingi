@@ -1,0 +1,210 @@
+---
+// "Write a review" starting from the institution:
+//   /vertet                         1. find the institution
+//   /vertet?iestade=<slug>          2. pick a teacher (or "not in the list")
+//   /vertet?iestade=<slug>&vards=…  3. review form for a suggested teacher (POST here)
+import Base from '../../layouts/Base.astro';
+import Breadcrumbs from '../../components/Breadcrumbs.astro';
+import InstitutionItem from '../../components/InstitutionItem.astro';
+import ReviewFields from '../../components/ReviewFields.astro';
+import Score from '../../components/Score.astro';
+import { plural } from '../../lib/format';
+import { getInstitutionBySlug, getInstitutionTeachers, listInstitutions } from '../../lib/institutions';
+import { handleReviewPost } from '../../lib/review-page';
+import { emptyReviewValues, getReviewFormOptions, parseSuggestedName, type ReviewErrors } from '../../lib/reviews';
+import { normalizeForSearch } from '../../lib/slug';
+import { cleanLine, NAME_MAX, teacherNameError } from '../../lib/validate';
+
+const env = Astro.locals.runtime.env;
+const db = env.DB;
+const sp = Astro.url.searchParams;
+
+const institution = sp.get('iestade') ? await getInstitutionBySlug(db, sp.get('iestade')!) : null;
+const q = cleanLine(sp.get('q'), 100);
+const teacherFilter = cleanLine(sp.get('meklet'), 100);
+let suggestedName = cleanLine(sp.get('vards'), NAME_MAX + 1);
+let nameError = suggestedName ? teacherNameError(suggestedName) : null;
+const posted = Astro.request.method === 'POST' && institution !== null;
+
+// A POST always stays on step 3, so a bad name never throws away the review text.
+const step = !institution ? 1 : posted || (suggestedName && !nameError) ? 3 : 2;
+const formOptions = step === 3 ? await getReviewFormOptions(db) : null;
+let values = emptyReviewValues();
+let errors: ReviewErrors = {};
+
+if (posted && formOptions) {
+  const form = await Astro.request.formData();
+  const name = parseSuggestedName(form);
+  suggestedName = name.name;
+  nameError = name.error;
+  const result = await handleReviewPost(
+    env,
+    form,
+    formOptions,
+    name.error ? null : { kind: 'suggested', fullName: name.name, institutionId: institution!.id },
+    name.error ? { teacherName: name.error } : {},
+  );
+  if (result.redirect) return Astro.redirect(result.redirect, 303);
+  values = result.values;
+  errors = result.errors;
+  Astro.response.status = 422;
+}
+
+// Step 1: institution search
+const institutionResults =
+  !institution && q
+    ? await listInstitutions(db, { q, veids: null, tips: null, vieta: null, sort: 'atbilstiba', page: 1 })
+    : null;
+
+// Step 2/3: teachers at the institution
+const teachers = institution ? await getInstitutionTeachers(db, institution.id) : [];
+const filterNorm = normalizeForSearch(teacherFilter);
+const shownTeachers = filterNorm ? teachers.filter((t) => normalizeForSearch(t.full_name).includes(filterNorm)) : teachers;
+
+// Step 3: "did you mean" — teachers at this institution sharing a word (3+ letters) with the suggested name
+const nameWords = normalizeForSearch(suggestedName).split(' ').filter((w) => w.length >= 3);
+const similar = step === 3
+  ? teachers.filter((t) => normalizeForSearch(t.full_name).split(' ').some((w) => nameWords.includes(w)))
+  : [];
+
+const errorCount = Object.keys(errors).filter((k) => k !== 'missingCriteria').length;
+---
+
+<Base title="Uzrakstīt atsauksmi" noindex>
+  <Breadcrumbs
+    items={[
+      { label: 'Sākums', href: '/' },
+      ...(institution ? [{ label: institution.name, href: `/iestades/${institution.slug}` }] : []),
+      { label: 'Uzrakstīt atsauksmi' },
+    ]}
+  />
+
+  <div class="form-page">
+    <h1>Uzrakstīt atsauksmi</h1>
+    <ol class="progress" aria-label="Soļi">
+      <li class:list={[step === 1 && 'current', step > 1 && 'done']}>Iestāde</li>
+      <li class:list={[step === 2 && 'current', step > 2 && 'done']}>Pedagogs</li>
+      <li class:list={[step === 3 && 'current']}>Atsauksme</li>
+    </ol>
+
+    {step === 1 && (
+      <section>
+        <form class="search-box" method="get" action="/vertet" role="search">
+          <label class="visually-hidden" for="q">Iestādes nosaukums</label>
+          <input id="q" type="search" name="q" value={q} placeholder="Skolas vai augstskolas nosaukums…" maxlength="100" required autofocus />
+          <button type="submit">Meklēt</button>
+        </form>
+        {institutionResults && (
+          institutionResults.total > 0 ? (
+            <>
+              <p class="muted small footnote">Izvēlies iestādi:</p>
+              <ul class="result-list">
+                {institutionResults.rows.slice(0, 10).map((inst) => <InstitutionItem inst={inst} href={`/vertet?iestade=${inst.slug}`} />)}
+              </ul>
+              {institutionResults.total > 10 && <p class="subtle small footnote">Rādītas 10 no {institutionResults.total}. Precizē nosaukumu, ja vajadzīgās iestādes nav sarakstā.</p>}
+            </>
+          ) : (
+            <div class="empty footnote"><p>Neviena iestāde neatbilst “{q}”. Pamēģini citu nosaukumu.</p></div>
+          )
+        )}
+      </section>
+    )}
+
+    {step === 2 && institution && (
+      <section>
+        <p>
+          <strong>{institution.name}</strong>
+          <a class="small" href="/vertet">mainīt</a>
+        </p>
+
+        {teachers.length > 0 && (
+          <>
+            <h2>Izvēlies pedagogu</h2>
+            {teachers.length > 8 && (
+              <form method="get" action="/vertet" class="form-row">
+                <input type="hidden" name="iestade" value={institution.slug} />
+                <label class="grow">
+                  Meklēt pēc vārda
+                  <input type="search" name="meklet" value={teacherFilter} maxlength="100" />
+                </label>
+                <button type="submit">Meklēt</button>
+              </form>
+            )}
+            <ul class="result-list footnote">
+              {shownTeachers.map((t) => (
+                <li class="result">
+                  <div class="body">
+                    <a class="title" href={`/pedagogi/${t.slug}/vertet?iestade=${institution.slug}`}>{t.full_name}</a>
+                    {t.subjects && <div class="meta">{t.subjects}</div>}
+                  </div>
+                  <div class="side">
+                    <Score score={t.avg_score} />
+                    <span class="count">{t.review_count > 0 ? plural(t.review_count, 'atsauksme', 'atsauksmes') : 'Nav atsauksmju'}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {shownTeachers.length === 0 && <p class="muted">Neviens pedagogs neatbilst “{teacherFilter}”.</p>}
+          </>
+        )}
+
+        <h2>{teachers.length ? 'Pedagoga nav sarakstā?' : 'Šai iestādei vēl nav pievienotu pedagogu'}</h2>
+        <p class="muted small">
+          Ieraksti pedagoga vārdu un uzvārdu. Jauns pedagogs parādīsies vietnē pēc tam, kad moderators būs pārbaudījis
+          ieteikumu un tavu atsauksmi.
+        </p>
+        <form method="get" action="/vertet" class="form-row">
+          <input type="hidden" name="iestade" value={institution.slug} />
+          <label class="grow">
+            Vārds, uzvārds
+            <input type="text" name="vards" value={suggestedName} required maxlength={NAME_MAX} autocomplete="off" aria-invalid={nameError ? 'true' : undefined} />
+          </label>
+          <button type="submit">Turpināt</button>
+        </form>
+        {nameError && <p class="field-error">{nameError}</p>}
+      </section>
+    )}
+
+    {step === 3 && institution && formOptions && (
+      <section>
+        {similar.length > 0 && (
+          <div class="card notice-card">
+            <strong>Varbūt meklē kādu no šiem pedagogiem?</strong>
+            <ul class="plain-list footnote">
+              {similar.map((t) => (
+                <li><a href={`/pedagogi/${t.slug}/vertet?iestade=${institution.slug}`}>{t.full_name}</a>{t.subjects && <span class="muted small"> · {t.subjects}</span>}</li>
+              ))}
+            </ul>
+            <p class="muted small footnote">Ja neviens nav īstais, turpini ar formu zemāk.</p>
+          </div>
+        )}
+
+        {errorCount > 0 && (
+          <div class="notice err" role="alert">
+            {errors.form && errorCount === 1 ? errors.form : 'Lūdzu, izlabo atzīmētās vietas formā.'}
+          </div>
+        )}
+
+        <form method="post" action={`/vertet?iestade=${institution.slug}&vards=${encodeURIComponent(suggestedName)}`} class="review-form">
+          <section class="form-section" aria-labelledby="sec-teacher">
+            <h2 id="sec-teacher">Pedagogs</h2>
+            <div class="form-grid">
+              <label>
+                <span>Vārds, uzvārds</span>
+                <input type="text" name="teacher_name" value={suggestedName} required maxlength={NAME_MAX} autocomplete="off" aria-invalid={errors.teacherName ? 'true' : undefined} />
+                {errors.teacherName && <span class="field-error">{errors.teacherName}</span>}
+              </label>
+              <div>
+                <span class="label-text">Iestāde</span>
+                <p>{institution.name} <a class="small" href={`/vertet?iestade=${institution.slug}`}>mainīt</a></p>
+              </div>
+            </div>
+            <p class="subtle small">Jauns pedagogs tiks pievienots pēc moderatora pārbaudes.</p>
+          </section>
+
+          <ReviewFields options={formOptions} values={values} errors={errors} turnstileSiteKey={env.TURNSTILE_SITE_KEY} />
+        </form>
+      </section>
+    )}
+  </div>
+</Base>

@@ -1,0 +1,9 @@
+# Copy to .dev.vars for local development (never committed).
+# Locally there is no Cloudflare Access in front of the site, so /admin
+# treats you as this email. Ignored in production builds.
+DEV_ADMIN_EMAIL=admin@example.com
+
+# Cloudflare Turnstile TEST secret: always passes. The matching test site key is in
+# wrangler.jsonc. Production uses: npx wrangler secret put TURNSTILE_SECRET_KEY --env production
+# Other test secrets: 2x0000000000000000000000000000000AA (always fails).
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA

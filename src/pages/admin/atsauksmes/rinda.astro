@@ -1,0 +1,26 @@
+---
+// Moderation queue entry point: forwards to the oldest pending review (or the next one after
+// a skipped review, ?pec=<id>). Keeps the ?msg= of the action that was just completed.
+import Admin from '../../../layouts/Admin.astro';
+import { nextPendingReviewId } from '../../../lib/moderation';
+import { positiveInt } from '../../../lib/validate';
+
+const db = Astro.locals.runtime.env.DB;
+const after = positiveInt(Astro.url.searchParams.get('pec'));
+const msg = Astro.url.searchParams.get('msg');
+
+let nextId = await nextPendingReviewId(db, after);
+// Skipped past the end: start again from the oldest.
+if (!nextId && after) nextId = await nextPendingReviewId(db, null);
+if (nextId) {
+  return Astro.redirect(`/admin/atsauksmes/${nextId}?rinda=1${msg ? `&msg=${encodeURIComponent(msg)}` : ''}`, 303);
+}
+---
+
+<Admin title="Moderēšanas rinda">
+  {msg && msg !== 'gone' && <div class="notice ok">Gatavs.</div>}
+  <div class="empty">
+    <p><strong>Rinda ir tukša.</strong> Visas atsauksmes ir apstrādātas.</p>
+    <p><a href="/admin/atsauksmes?statuss=approved">Skatīt publicētās atsauksmes</a></p>
+  </div>
+</Admin>

@@ -1,0 +1,90 @@
+---
+// Teacher reply queue (admins and moderators).
+import Admin from '../../layouts/Admin.astro';
+import Score from '../../components/Score.astro';
+import { formatDate } from '../../lib/format';
+import { approveReply, listPendingReplies, rejectReply } from '../../lib/replies';
+import { positiveInt } from '../../lib/validate';
+
+const db = Astro.locals.runtime.env.DB;
+const me = Astro.locals.admin!;
+
+let error: string | null = null;
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const id = positiveInt(form.get('reply_id'));
+  const action = form.get('action');
+  const result = !id
+    ? { ok: false as const, error: 'Nederīgs pieprasījums.' }
+    : action === 'approve'
+      ? await approveReply(db, id, me.id, form.get('body'))
+      : action === 'reject'
+        ? await rejectReply(db, id, me.id)
+        : { ok: false as const, error: 'Nezināma darbība.' };
+  if (result.ok) return Astro.redirect(`/admin/atbildes?msg=${action}`, 303);
+  error = result.error;
+}
+
+const replies = await listPendingReplies(db);
+const msg = Astro.url.searchParams.get('msg');
+const message = msg === 'approve' ? 'Atbilde publicēta, e-pasts dzēsts.' : msg === 'reject' ? 'Atbilde noraidīta, e-pasts dzēsts.' : null;
+---
+
+<Admin title="Pedagogu atbildes">
+  {message && <div class="notice ok">{message}</div>}
+  {error && <div class="notice err" role="alert">{error}</div>}
+
+  <p class="muted">
+    Pirms publicēšanas pārliecinieties, ka atbildi rakstījis pats pedagogs: piemēram, e-pasts ir iestādes domēnā vai
+    pedagogs to apstiprina, atbildot uz jūsu vēstuli. Pēc lēmuma e-pasta adrese tiek dzēsta.
+  </p>
+
+  {replies.length === 0 ? (
+    <div class="empty"><p>Nav atbilžu, kas gaida pārbaudi.</p></div>
+  ) : (
+    <div class="stack">
+      {replies.map((p) => (
+        <section class="card">
+          <div class="review-head">
+            <Score score={p.review_score} />
+            <div class="review-context">
+              <div class="review-what">
+                <a href={`/pedagogi/${p.teacher_slug}#atsauksme-${p.review_id}`} target="_blank" rel="noopener">{p.teacher_name}</a>
+              </div>
+              <div class="small muted">{p.institution_name} · <a href={`/admin/atsauksmes/${p.review_id}`}>atsauksme #{p.review_id}</a></div>
+            </div>
+          </div>
+          <details class="original footnote">
+            <summary>Atsauksme, uz kuru atbild</summary>
+            <p class="review-text small">{p.review_comment}</p>
+          </details>
+
+          <dl class="details footnote">
+            <dt>E-pasts</dt>
+            <dd>
+              {p.contact_email
+                ? <a href={`mailto:${p.contact_email}?subject=${encodeURIComponent('Jūsu atbilde vietnē Pedagogu vērtējumi')}`}>{p.contact_email}</a>
+                : '—'}
+            </dd>
+            <dt>Iesniegta</dt><dd>{formatDate(p.created_at)}</dd>
+          </dl>
+          {p.has_approved_reply === 1 && (
+            <p class="small notice-inline">Šai atsauksmei jau ir publicēta atbilde; apstiprinot jaunā to aizstās.</p>
+          )}
+
+          <form method="post" class="stack-form footnote">
+            <input type="hidden" name="reply_id" value={p.id} />
+            <label>
+              Atbildes teksts (var izlabot pirms publicēšanas)
+              <textarea name="body" rows="5" required>{p.body}</textarea>
+            </label>
+            <div class="form-row">
+              <button type="submit" name="action" value="approve">Publicēt</button>
+              <button type="submit" name="action" value="reject" class="secondary" formnovalidate>Noraidīt</button>
+            </div>
+          </form>
+        </section>
+      ))}
+    </div>
+  )}
+</Admin>

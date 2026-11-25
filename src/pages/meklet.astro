@@ -1,0 +1,78 @@
+---
+import Base from '../layouts/Base.astro';
+import Breadcrumbs from '../components/Breadcrumbs.astro';
+import InstitutionItem from '../components/InstitutionItem.astro';
+import Score from '../components/Score.astro';
+import { plural } from '../lib/format';
+import { listInstitutions, type ListParams } from '../lib/institutions';
+import { searchTeachers } from '../lib/teachers';
+
+const db = Astro.locals.runtime.env.DB;
+const q = (Astro.url.searchParams.get('q') ?? '').trim().slice(0, 100);
+
+const INSTITUTION_LIMIT = 10;
+let institutions: Awaited<ReturnType<typeof listInstitutions>> | null = null;
+let teachers: Awaited<ReturnType<typeof searchTeachers>> = [];
+
+if (q) {
+  const params: ListParams = { q, veids: null, tips: null, vieta: null, sort: 'atbilstiba', page: 1 };
+  [institutions, teachers] = await Promise.all([listInstitutions(db, params), searchTeachers(db, q)]);
+}
+
+const shownInstitutions = institutions?.rows.slice(0, INSTITUTION_LIMIT) ?? [];
+const nothingFound = q && institutions?.total === 0 && teachers.length === 0;
+---
+
+<Base title={q ? `Meklēšana: ${q}` : 'Meklēšana'} noindex hideHeaderSearch>
+  <Breadcrumbs items={[{ label: 'Sākums', href: '/' }, { label: 'Meklēšana' }]} />
+  <h1>Meklēšana</h1>
+
+  <form class="search-box" action="/meklet" method="get" role="search">
+    <label class="visually-hidden" for="q">Meklēt iestādi vai pedagogu</label>
+    <input id="q" type="search" name="q" value={q} placeholder="Skolas, augstskolas vai pedagoga vārds…" maxlength="100" autofocus={!q} />
+    <button type="submit">Meklēt</button>
+  </form>
+
+  {nothingFound && (
+    <div class="empty footnote">
+      <p><strong>Nekas netika atrasts pēc “{q}”.</strong></p>
+      <p>Pārbaudi rakstību vai meklē pēc daļas no nosaukuma, piemēram, tikai pilsētas vai skolas numura.</p>
+    </div>
+  )}
+
+  {teachers.length > 0 && (
+    <section>
+      <h2>Pedagogi</h2>
+      <ul class="result-list">
+        {teachers.map((t) => (
+          <li class="result">
+            <div class="body">
+              <a class="title" href={`/pedagogi/${t.slug}`}>{t.full_name}</a>
+              {t.institutions && <div class="meta">{t.institutions}</div>}
+            </div>
+            <div class="side">
+              <Score score={t.avg_score} />
+              <span class="count">
+                {t.review_count > 0 ? plural(t.review_count, 'atsauksme', 'atsauksmes') : 'Nav atsauksmju'}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  {institutions && institutions.total > 0 && (
+    <section>
+      <div class="list-head">
+        <h2>Iestādes <span class="muted small">({institutions.total})</span></h2>
+        {institutions.total > INSTITUTION_LIMIT && (
+          <a href={`/iestades?q=${encodeURIComponent(q)}`}>Skatīt visas {institutions.total} iestādes ›</a>
+        )}
+      </div>
+      <ul class="result-list">
+        {shownInstitutions.map((inst) => <InstitutionItem inst={inst} />)}
+      </ul>
+    </section>
+  )}
+</Base>
